@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: stamped
+    runtime: node
+    region: ohio
+    plan: starter
+    buildCommand: |
+      npm install &&
+      sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma &&
+      npx prisma generate &&
+      npx prisma migrate deploy &&
+      npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stamped-db
+          property: connectionString
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AZURE_AD_CLIENT_ID
+        sync: false
+      - key: AZURE_AD_CLIENT_SECRET
+        sync: false
+      - key: AZURE_AD_TENANT_ID
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+
+databases:
+  - name: stamped-db
+    region: ohio
+    plan: starter
+    databaseName: stamped
+    user: stamped

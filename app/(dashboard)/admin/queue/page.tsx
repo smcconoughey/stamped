@@ -24,6 +24,8 @@ const QUICK_ACTIONS: { label: string; from: string[]; to: string; variant: "prim
   { label: "Mark Picked Up", from: ["READY_FOR_PICKUP"], to: "PICKED_UP", variant: "secondary" },
 ];
 
+const EMAIL_ACTION_STATUSES = ["SUBMITTED", "PENDING_APPROVAL"];
+
 const FILTER_TABS = [
   { label: "All Active", value: "" },
   { label: "My Queue", value: "mine" },
@@ -44,6 +46,9 @@ export default function AdminQueuePage() {
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [emailingId, setEmailingId] = useState<string | null>(null);
+  const [polling, setPolling] = useState(false);
+  const [pollResult, setPollResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAdmin && user) {
@@ -96,11 +101,52 @@ export default function AdminQueuePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (res.ok) {
-        await fetchRequests();
-      }
+      if (res.ok) await fetchRequests();
     } finally {
       setUpdatingId(null);
+    }
+  }
+
+  async function sendApprovalEmail(requestId: string) {
+    setEmailingId(requestId);
+    try {
+      const res = await fetch("/api/email/send-approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId }),
+      });
+      const data = await res.json();
+      if (data.mode === "draft") {
+        alert(`Draft (Graph not configured):\n\nTo: ${data.to}\n\n${data.body}`);
+      } else if (res.ok) {
+        await fetchRequests();
+      } else {
+        alert(data.error ?? "Failed to send email");
+      }
+    } finally {
+      setEmailingId(null);
+    }
+  }
+
+  async function pollInbox() {
+    setPolling(true);
+    setPollResult(null);
+    try {
+      const res = await fetch("/api/email/poll", { method: "POST" });
+      const data = await res.json();
+      if (data.error) {
+        setPollResult(`Error: ${data.error}`);
+      } else {
+        const matched = data.matched ?? 0;
+        setPollResult(
+          matched > 0
+            ? `Processed ${matched} reply email${matched !== 1 ? "s" : ""}. Refreshing...`
+            : `Checked inbox — no matching replies found.`
+        );
+        if (matched > 0) await fetchRequests();
+      }
+    } finally {
+      setPolling(false);
     }
   }
 
@@ -114,6 +160,24 @@ export default function AdminQueuePage() {
       />
 
       <div className="p-6 space-y-5">
+        {/* Toolbar */}
+        <div className="flex items-center justify-between">
+          <div />
+          <div className="flex items-center gap-2">
+            {pollResult && (
+              <span className="text-xs text-ink-secondary">{pollResult}</span>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={pollInbox}
+              disabled={polling}
+            >
+              {polling ? "Checking inbox..." : "Poll Inbox for Replies"}
+            </Button>
+          </div>
+        </div>
+
         {/* AI Summary */}
         <AISummaryBox />
 
@@ -228,6 +292,17 @@ export default function AdminQueuePage() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5 flex-wrap">
+                            {/* Email action for submitted/pending */}
+                            {EMAIL_ACTION_STATUSES.includes(req.status) && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => sendApprovalEmail(req.id)}
+                                disabled={emailingId === req.id}
+                              >
+                                {emailingId === req.id ? "..." : "Send Approval Email"}
+                              </Button>
+                            )}
                             {availableActions.map((action) => (
                               <Button
                                 key={action.to}
@@ -240,9 +315,7 @@ export default function AdminQueuePage() {
                               </Button>
                             ))}
                             <Link href={`/requests/${req.id}`}>
-                              <Button variant="ghost" size="sm">
-                                View
-                              </Button>
+                              <Button variant="ghost" size="sm">View</Button>
                             </Link>
                           </div>
                         </td>
