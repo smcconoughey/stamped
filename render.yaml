@@ -37,6 +37,6 @@ services:
 databases:
   - name: stamped-db
     region: ohio
-    plan: starter
+    plan: free
     databaseName: stamped
     user: stamped
