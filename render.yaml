@@ -7,8 +7,8 @@ services:
     buildCommand: |
       npm ci --legacy-peer-deps &&
       sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma &&
-      npx prisma generate &&
-      npx prisma migrate deploy &&
+      ./node_modules/.bin/prisma generate &&
+      ./node_modules/.bin/prisma migrate deploy &&
       npm run build
     startCommand: npm start
     healthCheckPath: /api/health
