@@ -1,8 +1,5 @@
-import { config } from "dotenv";
-
-// Load .env for local CLI usage (no-op in production where env vars are already set)
-config();
-
+// Prisma 7 auto-loads .env before evaluating this file.
+// On Render, DATABASE_URL is injected directly from the environment.
 export default {
   datasource: {
     url: process.env.DATABASE_URL ?? "file:./dev.db",
