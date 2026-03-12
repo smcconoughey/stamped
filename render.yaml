@@ -9,7 +9,7 @@ services:
       npm ci --legacy-peer-deps --include=dev &&
       sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma &&
       ./node_modules/.bin/prisma generate &&
-      ./node_modules/.bin/prisma migrate deploy &&
+      ./node_modules/.bin/prisma db push --accept-data-loss &&
       npm run build
     startCommand: npm start
     healthCheckPath: /api/health
@@ -33,6 +33,10 @@ services:
       - key: AZURE_AD_TENANT_ID
         sync: false
       - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: PLATFORM_ADMIN_EMAIL
+        sync: false
+      - key: PLATFORM_ADMIN_PASSWORD
         sync: false
 
 databases:
