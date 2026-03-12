@@ -5,6 +5,7 @@ services:
     region: ohio
     plan: starter
     buildCommand: |
+      rm -rf node_modules &&
       npm ci --legacy-peer-deps &&
       sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma &&
       ./node_modules/.bin/prisma generate &&
