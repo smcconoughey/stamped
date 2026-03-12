@@ -5,10 +5,10 @@ services:
     region: ohio
     plan: starter
     buildCommand: |
-      npm install --legacy-peer-deps &&
+      npm ci --legacy-peer-deps &&
       sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma &&
-      npx prisma generate --config prisma/prisma.config.ts &&
-      npx prisma migrate deploy --config prisma/prisma.config.ts &&
+      npx prisma generate &&
+      npx prisma migrate deploy &&
       npm run build
     startCommand: npm start
     healthCheckPath: /api/health
