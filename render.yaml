@@ -6,7 +6,7 @@ services:
     plan: starter
     buildCommand: |
       rm -rf node_modules &&
-      npm ci --legacy-peer-deps &&
+      npm ci --legacy-peer-deps --include=dev &&
       sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma &&
       ./node_modules/.bin/prisma generate &&
       ./node_modules/.bin/prisma migrate deploy &&
