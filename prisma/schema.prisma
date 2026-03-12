@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String   @unique
+  slug        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizations Organization[]
+  users         User[]
+  settings      TenantSettings?
+}
+
+model TenantSettings {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  emailFromName    String?
+  emailFromAddress String?
+  emailReplyTo     String?
+
+  msGraphClientId     String?
+  msGraphClientSecret String?
+  msTenantId          String?
+  msMailboxAddress    String?
+
+  requireAdvisorApproval Boolean @default(true)
+  requireFinanceApproval Boolean @default(false)
+  autoApproveUnder       Float?
+
+  requestPrefix        String @default("REQ")
+  currentRequestNumber Int    @default(0)
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      String   @default("STUDENT")
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  azureId   String?  @unique
+  password  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submittedRequests  PurchaseRequest[]    @relation("Submitted")
+  assignedRequests   PurchaseRequest[]    @relation("Assigned")
+  orgMemberships     OrganizationMember[]
+  auditLogs          AuditLog[]
+  accounts           Account[]
+  sessions           Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Organization {
+  id         String   @id @default(cuid())
+  name       String
+  code       String
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  department String?
+  costCenter String?
+  active     Boolean  @default(true)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  budgets  Budget[]
+  requests PurchaseRequest[]
+  members  OrganizationMember[]
+
+  @@unique([tenantId, code])
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  memberRole     String       @default("MEMBER")
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, userId])
+}
+
+model Budget {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  fiscalYear     String
+  allocated      Float
+  spent          Float        @default(0)
+  reserved       Float        @default(0)
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, fiscalYear])
+}
+
+model PurchaseRequest {
+  id             String       @id @default(cuid())
+  number         String       @unique
+  title          String
+  description    String?
+  justification  String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  submittedById  String
+  submittedBy    User         @relation("Submitted", fields: [submittedById], references: [id])
+  assignedToId   String?
+  assignedTo     User?        @relation("Assigned", fields: [assignedToId], references: [id])
+
+  status   String @default("DRAFT")
+  priority String @default("NORMAL")
+
+  advisorEmail String
+  advisorName  String?
+
+  vendorName String?
+  vendorUrl  String?
+  vendorNote String?
+
+  totalEstimated Float?
+  totalActual    Float?
+
+  neededBy    DateTime?
+  submittedAt DateTime?
+  orderedAt   DateTime?
+  receivedAt  DateTime?
+  readyAt     DateTime?
+  pickedUpAt  DateTime?
+
+  notes      String?
+  adminNotes String?
+
+  items        RequestItem[]
+  approvals    Approval[]
+  auditLogs    AuditLog[]
+  emailThreads EmailThread[]
+  attachments  Attachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RequestItem {
+  id          String          @id @default(cuid())
+  requestId   String
+  request     PurchaseRequest @relation(fields: [requestId], references: [id])
+  name        String
+  description String?
+  quantity    Int
+  unitPrice   Float?
+  totalPrice  Float?
+  url         String?
+  vendor      String?
+  partNumber  String?
+  category    String?
+  received    Int             @default(0)
+  createdAt   DateTime        @default(now())
+}
+
+model Approval {
+  id            String          @id @default(cuid())
+  requestId     String
+  request       PurchaseRequest @relation(fields: [requestId], references: [id])
+  approverEmail String
+  approverName  String?
+  status        String          @default("PENDING")
+
+  emailSentAt        DateTime?
+  emailMessageId     String?
+  responseEmailId    String?
+  responseReceivedAt DateTime?
+  responseRaw        String?
+  aiParsedDecision   String?
+  aiConfidence       Float?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmailThread {
+  id             String          @id @default(cuid())
+  requestId      String
+  request        PurchaseRequest @relation(fields: [requestId], references: [id])
+  messageId      String
+  conversationId String?
+  subject        String?
+  fromAddress    String?
+  toAddress      String?
+  receivedAt     DateTime?
+  body           String?
+  aiSummary      String?
+  direction      String          @default("OUTBOUND")
+  createdAt      DateTime        @default(now())
+}
+
+model AuditLog {
+  id        String           @id @default(cuid())
+  requestId String?
+  request   PurchaseRequest? @relation(fields: [requestId], references: [id])
+  userId    String?
+  user      User?            @relation(fields: [userId], references: [id])
+  action    String
+  details   String?
+  metadata  String?
+  ipAddress String?
+  createdAt DateTime         @default(now())
+}
+
+model Attachment {
+  id        String          @id @default(cuid())
+  requestId String
+  request   PurchaseRequest @relation(fields: [requestId], references: [id])
+  filename  String
+  url       String
+  mimeType  String?
+  size      Int?
+  createdAt DateTime        @default(now())
+}
