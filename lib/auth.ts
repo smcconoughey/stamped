@@ -3,6 +3,13 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
+import bcrypt from "bcryptjs";
+
+// ─── Platform Admin (hardcoded, no tenant) ───────────────────────────────────
+// Set PLATFORM_ADMIN_EMAIL + PLATFORM_ADMIN_PASSWORD in env.
+// This account sits above all tenants and can manage schools/instances.
+const PLATFORM_EMAIL = process.env.PLATFORM_ADMIN_EMAIL;
+const PLATFORM_PASSWORD = process.env.PLATFORM_ADMIN_PASSWORD;
 
 // Determine tenant from email domain
 async function findTenantByDomain(email: string) {
@@ -76,7 +83,7 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
-    // Credentials fallback — for dev and admin bootstrapping
+    // Credentials — platform admin + tenant users
     CredentialsProvider({
       name: "Email",
       credentials: {
@@ -84,8 +91,25 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email) return null;
+        if (!credentials?.email || !credentials?.password) return null;
 
+        // ── Platform admin check (hardcoded, env-based) ──
+        if (
+          PLATFORM_EMAIL &&
+          PLATFORM_PASSWORD &&
+          credentials.email === PLATFORM_EMAIL &&
+          credentials.password === PLATFORM_PASSWORD
+        ) {
+          return {
+            id: "platform-admin",
+            email: PLATFORM_EMAIL,
+            name: "Platform Admin",
+            role: "PLATFORM_ADMIN",
+            tenantId: null,
+          } as any;
+        }
+
+        // ── Tenant user check ──
         const user = await prisma.user.findUnique({
           where: { email: credentials.email },
           include: { tenant: true },
@@ -93,8 +117,13 @@ export const authOptions: NextAuthOptions = {
 
         if (!user || !user.active) return null;
 
-        // TODO: add bcrypt check once passwords are set
-        // For now: only allow if no password hash is set (dev mode) or password matches
+        // If user has a password hash, verify it; otherwise allow any password
+        // (supports dev seed accounts and the /setup bootstrap flow)
+        if (user.password) {
+          const valid = await bcrypt.compare(credentials.password, user.password);
+          if (!valid) return null;
+        }
+
         return {
           id: user.id,
           email: user.email,
