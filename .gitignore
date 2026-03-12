@@ -39,3 +39,7 @@ next-env.d.ts
 
 # prisma
 prisma/*.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
