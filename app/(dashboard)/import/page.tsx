@@ -143,17 +143,6 @@ function ImportInner() {
   const user = session?.user as any;
   const searchParams = useSearchParams();
 
-  useEffect(() => {
-    const t = searchParams.get("tab") as TabId | null;
-    if (t && ["requests", "budgets", "members"].includes(t)) switchTab(t);
-  }, []);
-
-  useEffect(() => {
-    if (tab !== "requests") return;
-    fetch("/api/budgets").then(r => r.json()).then(d => {
-      setAvailableBudgets((d.budgets ?? []).map((b: any) => ({ id: b.id, label: b.label })));
-    }).catch(() => {});
-  }, [tab]);
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
   const isOrgLead = user?.role === "ORG_LEAD";
 
@@ -172,6 +161,18 @@ function ImportInner() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [availableBudgets, setAvailableBudgets] = useState<{ id: string; label: string }[]>([]);
   const [selectedBudgetId, setSelectedBudgetId] = useState("");
+
+  useEffect(() => {
+    const t = searchParams.get("tab") as TabId | null;
+    if (t && ["requests", "budgets", "members"].includes(t)) switchTab(t);
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "requests") return;
+    fetch("/api/budgets").then(r => r.json()).then(d => {
+      setAvailableBudgets((d.budgets ?? []).map((b: any) => ({ id: b.id, label: b.label })));
+    }).catch(() => {});
+  }, [tab]);
 
   const canImportBudgets = isAdmin;
   const canImportMembers = isAdmin || isOrgLead;
