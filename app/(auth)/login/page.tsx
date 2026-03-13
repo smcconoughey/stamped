@@ -63,9 +63,13 @@ function LoginForm() {
 
           {(error || callbackError) && (
             <div className="mb-5 px-4 py-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">
-              {error || (callbackError === "OAuthAccountNotLinked"
-                ? "This email is already registered. Use email/password to sign in."
-                : "Sign in failed. Please try again.")}
+              {error || (
+                callbackError === "OAuthAccountNotLinked"
+                  ? "This email is already registered. Use email/password to sign in."
+                  : callbackError === "AccessDenied"
+                  ? "Your institution hasn't been set up in Stamped yet. Contact your purchasing administrator."
+                  : "Sign in failed. Please try again."
+              )}
             </div>
           )}
 

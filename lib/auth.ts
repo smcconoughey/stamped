@@ -40,7 +40,12 @@ async function findOrCreateSsoUser(email: string, name: string | null, azureId: 
 
   // New user — provision with STUDENT role, find tenant by email domain
   const tenant = await findTenantByDomain(email);
-  if (!tenant) return null; // No matching tenant = not allowed
+  if (!tenant) {
+    // No tenant registered for this email domain yet.
+    // Log so the platform admin can see who tried to sign in.
+    console.warn(`[SSO] No tenant for domain ${email.split("@")[1]} — user ${email} blocked. Create the tenant at /platform first.`);
+    return null;
+  }
 
   return prisma.user.create({
     data: {
