@@ -122,3 +122,50 @@ export async function PATCH(
 
   return NextResponse.json({ request: updated });
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const user = session.user as any;
+  const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+  const isOrgLead = user.role === "ORG_LEAD";
+
+  const existing = await prisma.purchaseRequest.findUnique({
+    where: { id: params.id },
+    include: { organization: { select: { tenantId: true } } },
+  });
+
+  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (existing.organization.tenantId !== user.tenantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const deletableStatuses = ["DRAFT", "SUBMITTED", "CANCELLED"];
+  const canDelete =
+    isAdmin ||
+    (isOrgLead && deletableStatuses.includes(existing.status)) ||
+    (existing.submittedById === user.id && deletableStatuses.includes(existing.status));
+
+  if (!canDelete) {
+    return NextResponse.json(
+      { error: "Requests can only be deleted when in Draft, Submitted, or Cancelled status" },
+      { status: 403 }
+    );
+  }
+
+  // Cascade delete related records then the request
+  await prisma.$transaction([
+    prisma.auditLog.deleteMany({ where: { requestId: params.id } }),
+    prisma.approval.deleteMany({ where: { requestId: params.id } }),
+    prisma.emailThread.deleteMany({ where: { requestId: params.id } }),
+    prisma.attachment.deleteMany({ where: { requestId: params.id } }),
+    prisma.requestItem.deleteMany({ where: { requestId: params.id } }),
+    prisma.purchaseRequest.delete({ where: { id: params.id } }),
+  ]);
+
+  return NextResponse.json({ ok: true });
+}

@@ -37,6 +37,7 @@ export async function POST(
 
   const user = session.user as any;
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+  const isOrgLead = user.role === "ORG_LEAD";
   const body = await req.json();
   const { status, notes } = body;
 
@@ -46,29 +47,41 @@ export async function POST(
 
   const request = await prisma.purchaseRequest.findUnique({
     where: { id: params.id },
+    include: { organization: { select: { tenantId: true } } },
   });
 
   if (!request) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  if (request.organization.tenantId !== user.tenantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  // Students can only submit or cancel their own drafts
-  if (!isAdmin) {
+  // ORG_LEAD: can force-set any status on requests in their orgs
+  if (isOrgLead) {
+    const leadMemberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, memberRole: "LEAD" },
+      select: { organizationId: true },
+    });
+    const leadOrgIds = leadMemberships.map((m: { organizationId: string }) => m.organizationId);
+    if (!leadOrgIds.includes(request.organizationId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    // fall through — no transition check for org leads
+  } else if (!isAdmin) {
+    // Regular students: can only submit or cancel their own drafts
     if (request.submittedById !== user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     if (!["SUBMITTED", "CANCELLED"].includes(status)) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
+    const validNext = VALID_TRANSITIONS[request.status] || [];
+    if (!validNext.includes(status)) {
+      return NextResponse.json({ error: `Cannot transition from ${request.status} to ${status}` }, { status: 400 });
+    }
   }
-
-  const validNext = VALID_TRANSITIONS[request.status] || [];
-  if (!validNext.includes(status)) {
-    return NextResponse.json(
-      { error: `Cannot transition from ${request.status} to ${status}` },
-      { status: 400 }
-    );
-  }
+  // Admins and org leads: no transition restriction — they can set any valid status
 
   const timestampField = STATUS_TIMESTAMPS[status];
   const updateData: any = {

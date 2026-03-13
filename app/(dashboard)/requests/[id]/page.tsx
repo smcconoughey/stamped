@@ -49,6 +49,7 @@ export default function RequestDetailPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
+  const isOrgLead = user?.role === "ORG_LEAD";
 
   const [request, setRequest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -152,6 +153,14 @@ export default function RequestDetailPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!confirm("Permanently delete this request? This cannot be undone.")) return;
+    const res = await fetch(`/api/requests/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      router.push("/requests");
+    }
+  }
+
   if (loading) {
     return (
       <div>
@@ -179,7 +188,16 @@ export default function RequestDetailPage() {
   }
 
   const currentFlowIndex = STATUS_FLOW.indexOf(request.status as RequestStatus);
-  const nextOptions = NEXT_STATUS_OPTIONS[request.status] || [];
+  // Admins and org leads can force-set any status; regular users see only valid transitions
+  const ALL_STATUSES = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP","PICKED_UP","CANCELLED"];
+  const nextOptions = (isAdmin || isOrgLead)
+    ? ALL_STATUSES.filter((s) => s !== request.status)
+    : NEXT_STATUS_OPTIONS[request.status] || [];
+
+  const canDelete =
+    isAdmin ||
+    (["DRAFT", "SUBMITTED", "CANCELLED"].includes(request.status) &&
+      (user?.role === "ORG_LEAD" || request.submittedById === user?.id));
 
   return (
     <div>
@@ -191,6 +209,11 @@ export default function RequestDetailPage() {
             {request.status === "DRAFT" && request.submittedById === user?.id && (
               <Button variant="stamp" size="sm" onClick={handleSubmitRequest} disabled={updatingStatus}>
                 Submit Request
+              </Button>
+            )}
+            {canDelete && (
+              <Button variant="secondary" size="sm" onClick={handleDelete} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                Delete
               </Button>
             )}
             <StatusBadge status={request.status as RequestStatus} />

@@ -7,31 +7,9 @@ import { Header } from "@/components/layout/header";
 import { StatusBadge } from "@/components/requests/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  formatDate,
-  formatCurrency,
-  STATUS_LABELS,
-  PRIORITY_COLORS,
-  PRIORITY_LABELS,
-  RequestStatus,
-} from "@/lib/utils";
+import { formatDate, formatCurrency, RequestStatus } from "@/lib/utils";
 
-// Active statuses shown at top; terminal statuses collapsible
-const ACTIVE_STATUSES = new Set(["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "ORDERED", "PARTIALLY_RECEIVED", "READY_FOR_PICKUP"]);
-const TERMINAL_STATUSES = new Set(["RECEIVED", "PICKED_UP", "CANCELLED"]);
-
-const STATUS_TABS: { label: string; value: string }[] = [
-  { label: "All", value: "" },
-  { label: "Active", value: "_active" },
-  { label: "Drafts", value: "DRAFT" },
-  { label: "Submitted", value: "SUBMITTED" },
-  { label: "Pending Approval", value: "PENDING_APPROVAL" },
-  { label: "Approved", value: "APPROVED" },
-  { label: "Ordered", value: "ORDERED" },
-  { label: "Received", value: "RECEIVED" },
-  { label: "Picked Up", value: "PICKED_UP" },
-  { label: "Cancelled", value: "CANCELLED" },
-];
+const ACTIVE_STATUSES = ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "ORDERED", "PARTIALLY_RECEIVED", "READY_FOR_PICKUP", "RECEIVED", "PICKED_UP"];
 
 const BULK_STATUS_OPTIONS = [
   { label: "Mark Submitted", value: "SUBMITTED" },
@@ -41,6 +19,28 @@ const BULK_STATUS_OPTIONS = [
   { label: "Mark Picked Up", value: "PICKED_UP" },
   { label: "Mark Cancelled", value: "CANCELLED" },
 ];
+
+// Compact colored status pill (not a badge, just an inline indicator)
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    DRAFT:              { label: "Draft",            cls: "bg-gray-100 text-gray-600" },
+    SUBMITTED:          { label: "Submitted",        cls: "bg-blue-50 text-blue-700" },
+    PENDING_APPROVAL:   { label: "Pending Approval", cls: "bg-yellow-50 text-yellow-700" },
+    APPROVED:           { label: "Approved",         cls: "bg-green-50 text-green-700" },
+    ORDERED:            { label: "Ordered",          cls: "bg-indigo-50 text-indigo-700" },
+    PARTIALLY_RECEIVED: { label: "Partial",          cls: "bg-orange-50 text-orange-700" },
+    RECEIVED:           { label: "Received",         cls: "bg-teal-50 text-teal-700" },
+    READY_FOR_PICKUP:   { label: "Ready",            cls: "bg-purple-50 text-purple-700" },
+    PICKED_UP:          { label: "Picked Up",        cls: "bg-gray-50 text-gray-500" },
+    CANCELLED:          { label: "Cancelled",        cls: "bg-red-50 text-red-600" },
+  };
+  const s = map[status] ?? { label: status, cls: "bg-gray-100 text-gray-600" };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.cls}`}>
+      {s.label}
+    </span>
+  );
+}
 
 export default function RequestsPage() {
   const { data: session } = useSession();
@@ -52,12 +52,8 @@ export default function RequestsPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeStatus, setActiveStatus] = useState("_active");
-  const [orgFilter, setOrgFilter] = useState("");
-  const [budgetFilter, setBudgetFilter] = useState("");
-  const [showCompleted, setShowCompleted] = useState(false);
-
-  // Bulk selection
+  // activeTab is a budget id, "all", or "cancelled"
+  const [activeTab, setActiveTab] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -65,11 +61,7 @@ export default function RequestsPage() {
   const fetchRequests = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (activeStatus && activeStatus !== "_active") params.set("status", activeStatus);
-      if (search) params.set("search", search);
-      if (orgFilter) params.set("orgId", orgFilter);
-      params.set("limit", "200");
+      const params = new URLSearchParams({ limit: "500" });
       const res = await fetch(`/api/requests?${params}`);
       const data = await res.json();
       setRequests(data.requests || []);
@@ -79,49 +71,56 @@ export default function RequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeStatus, orgFilter]);
+  }, []);
 
-  useEffect(() => {
-    fetchRequests();
-  }, [fetchRequests]);
+  useEffect(() => { fetchRequests(); }, [fetchRequests]);
 
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    fetchRequests();
+  // Derive budget tabs from loaded requests
+  const budgetMap = new Map<string, { id: string; name: string; fiscalYear: string }>();
+  for (const r of requests) {
+    if (r.budget) budgetMap.set(r.budget.id, r.budget);
   }
+  const budgets = Array.from(budgetMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
-  // Filter locally for _active tab and budget
-  const filtered = requests.filter((r) => {
-    if (activeStatus === "_active" && !ACTIVE_STATUSES.has(r.status)) return false;
-    if (budgetFilter && r.budget?.id !== budgetFilter) return false;
-    return true;
+  // Filter by tab
+  const tabFiltered = requests.filter((r) => {
+    if (activeTab === "cancelled") return r.status === "CANCELLED";
+    if (activeTab === "all") return r.status !== "CANCELLED";
+    return r.budget?.id === activeTab && r.status !== "CANCELLED";
   });
 
-  const activeRows = filtered.filter((r) => ACTIVE_STATUSES.has(r.status));
-  const completedRows = filtered.filter((r) => TERMINAL_STATUSES.has(r.status));
+  // Filter by search
+  const filtered = search
+    ? tabFiltered.filter((r) =>
+        r.number?.toLowerCase().includes(search.toLowerCase()) ||
+        r.title?.toLowerCase().includes(search.toLowerCase()) ||
+        r.vendorName?.toLowerCase().includes(search.toLowerCase()) ||
+        r.organization?.code?.toLowerCase().includes(search.toLowerCase())
+      )
+    : tabFiltered;
 
-  // Derive unique orgs and budgets for filter dropdowns
-  const allOrgs = Array.from(new Map(requests.map((r) => [r.organization?.id, r.organization])).values()).filter(Boolean);
-  const allBudgets = Array.from(new Map(requests.filter((r) => r.budget).map((r) => [r.budget.id, r.budget])).values());
+  // Sort: by status priority then date
+  const STATUS_ORDER = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","READY_FOR_PICKUP","RECEIVED","PICKED_UP","CANCELLED"];
+  const sorted = [...filtered].sort((a, b) => {
+    const si = STATUS_ORDER.indexOf(a.status);
+    const sj = STATUS_ORDER.indexOf(b.status);
+    if (si !== sj) return si - sj;
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
 
-  // Selection helpers
-  const visibleIds = filtered.map((r) => r.id);
+  const cancelledCount = requests.filter((r) => r.status === "CANCELLED").length;
+  const visibleIds = sorted.map((r) => r.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
-  const someSelected = selected.size > 0;
 
   function toggleAll() {
-    if (allSelected) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(visibleIds));
-    }
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(visibleIds));
   }
 
   function toggleOne(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   }
@@ -142,7 +141,12 @@ export default function RequestsPage() {
     }
   }
 
-  const showGrouped = activeStatus === "" || activeStatus === "_active";
+  async function handleDelete(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Permanently delete this request?")) return;
+    await fetch(`/api/requests/${id}`, { method: "DELETE" });
+    await fetchRequests();
+  }
 
   return (
     <div>
@@ -157,68 +161,53 @@ export default function RequestsPage() {
       />
 
       <div className="p-6 space-y-4">
-        {/* Search + Filters */}
-        <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-          <form onSubmit={handleSearch} className="flex gap-2 flex-1 min-w-0">
-            <Input
-              placeholder="Search by number, title..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="max-w-xs"
-            />
-            <Button type="submit" variant="secondary" size="md">
-              Search
-            </Button>
-          </form>
-
-          {/* Org filter — admin only */}
-          {isAdmin && allOrgs.length > 1 && (
-            <select
-              value={orgFilter}
-              onChange={(e) => setOrgFilter(e.target.value)}
-              className="text-sm border border-border rounded-md px-3 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy"
-            >
-              <option value="">All Orgs</option>
-              {allOrgs.map((o: any) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          )}
-
-          {/* Budget filter */}
-          {allBudgets.length > 1 && (
-            <select
-              value={budgetFilter}
-              onChange={(e) => setBudgetFilter(e.target.value)}
-              className="text-sm border border-border rounded-md px-3 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy"
-            >
-              <option value="">All Budgets</option>
-              {allBudgets.map((b: any) => (
-                <option key={b.id} value={b.id}>{b.name} ({b.fiscalYear})</option>
-              ))}
-            </select>
-          )}
+        {/* Search */}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Search number, title, vendor..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-xs"
+          />
         </div>
 
-        {/* Status Tabs */}
-        <div className="flex flex-wrap gap-1 border-b border-border">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => { setActiveStatus(tab.value); setSelected(new Set()); }}
-              className={`px-3 py-2 text-sm font-medium rounded-t border-b-2 transition-colors ${
-                activeStatus === tab.value
-                  ? "border-navy text-navy"
-                  : "border-transparent text-ink-secondary hover:text-ink"
-              }`}
+        {/* Budget/Cost Center Tabs */}
+        <div className="flex flex-wrap gap-0 border-b border-border">
+          <TabBtn active={activeTab === "all"} onClick={() => { setActiveTab("all"); setSelected(new Set()); }}>
+            All Active
+            <span className="ml-1.5 text-xs opacity-60">
+              {requests.filter((r) => r.status !== "CANCELLED").length}
+            </span>
+          </TabBtn>
+
+          {budgets.map((b) => {
+            const count = requests.filter((r) => r.budget?.id === b.id && r.status !== "CANCELLED").length;
+            return (
+              <TabBtn
+                key={b.id}
+                active={activeTab === b.id}
+                onClick={() => { setActiveTab(b.id); setSelected(new Set()); }}
+              >
+                {b.name}
+                <span className="ml-1.5 text-xs opacity-60">{count}</span>
+              </TabBtn>
+            );
+          })}
+
+          {cancelledCount > 0 && (
+            <TabBtn
+              active={activeTab === "cancelled"}
+              onClick={() => { setActiveTab("cancelled"); setSelected(new Set()); }}
+              danger
             >
-              {tab.label}
-            </button>
-          ))}
+              Cancelled
+              <span className="ml-1.5 text-xs opacity-60">{cancelledCount}</span>
+            </TabBtn>
+          )}
         </div>
 
         {/* Bulk action bar */}
-        {canBulkEdit && someSelected && (
+        {canBulkEdit && selected.size > 0 && (
           <div className="flex items-center gap-3 bg-navy/5 border border-navy/20 rounded-lg px-4 py-2.5">
             <span className="text-sm font-medium text-navy">{selected.size} selected</span>
             <select
@@ -231,250 +220,174 @@ export default function RequestsPage() {
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-            <Button
-              onClick={applyBulkStatus}
-              disabled={!bulkStatus || bulkLoading}
-              size="sm"
-            >
+            <Button onClick={applyBulkStatus} disabled={!bulkStatus || bulkLoading} size="sm">
               {bulkLoading ? "Applying…" : "Apply"}
             </Button>
-            <button
-              onClick={() => setSelected(new Set())}
-              className="text-sm text-ink-muted hover:text-ink ml-auto"
-            >
+            <button onClick={() => setSelected(new Set())} className="text-sm text-ink-muted hover:text-ink ml-auto">
               Clear
             </button>
           </div>
         )}
 
         {/* Table */}
-        {loading ? (
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-border">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>
-                    {[1, 2, 3, 4, 5, 6].map((j) => (
-                      <td key={j} className="px-4 py-3">
-                        <div className="h-4 bg-paper rounded animate-pulse" />
-                      </td>
-                    ))}
+        <div className="card p-0 overflow-hidden">
+          {loading ? (
+            <div className="divide-y divide-border">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="flex gap-4 px-4 py-3">
+                  {[80, 200, 100, 80, 80, 80].map((w, j) => (
+                    <div key={j} className="h-4 bg-paper rounded animate-pulse" style={{ width: w }} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="text-center py-12 text-ink-muted">
+              No requests found.{" "}
+              <Link href="/requests/new" className="text-navy hover:underline">
+                Submit a new request
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border bg-paper/50">
+                  <tr>
+                    {canBulkEdit && (
+                      <th className="px-3 py-2.5 w-8">
+                        <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-border" />
+                      </th>
+                    )}
+                    <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted w-28">Number</th>
+                    <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted">Title</th>
+                    <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">Status</th>
+                    {budgets.length > 1 && (
+                      <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden lg:table-cell">Budget</th>
+                    )}
+                    {isAdmin && (
+                      <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">Org</th>
+                    )}
+                    <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden lg:table-cell">Amount</th>
+                    <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">Date</th>
+                    <th className="px-4 py-2.5 w-8" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="card text-center py-12 text-ink-muted">
-            No requests found.{" "}
-            <Link href="/requests/new" className="text-navy hover:underline">
-              Submit a new request
-            </Link>
-          </div>
-        ) : showGrouped ? (
-          <>
-            {/* Active group */}
-            {activeRows.length > 0 && (
-              <RequestTable
-                rows={activeRows}
-                isAdmin={isAdmin}
-                canBulkEdit={canBulkEdit}
-                selected={selected}
-                onToggleAll={() => {
-                  const ids = activeRows.map((r) => r.id);
-                  const allSel = ids.every((id) => selected.has(id));
-                  setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (allSel) ids.forEach((id) => next.delete(id));
-                    else ids.forEach((id) => next.add(id));
-                    return next;
-                  });
-                }}
-                onToggleOne={toggleOne}
-                sectionLabel={activeStatus === "_active" ? "Active" : undefined}
-              />
-            )}
-
-            {/* Completed group — collapsible when showing "All" or "Active" */}
-            {completedRows.length > 0 && (
-              <div>
-                <button
-                  onClick={() => setShowCompleted((v) => !v)}
-                  className="flex items-center gap-2 text-sm text-ink-muted hover:text-ink mb-2 font-medium"
-                >
-                  <svg className={`w-4 h-4 transition-transform ${showCompleted ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                  Completed / Closed ({completedRows.length})
-                </button>
-                {showCompleted && (
-                  <RequestTable
-                    rows={completedRows}
-                    isAdmin={isAdmin}
-                    canBulkEdit={canBulkEdit}
-                    selected={selected}
-                    onToggleAll={() => {
-                      const ids = completedRows.map((r) => r.id);
-                      const allSel = ids.every((id) => selected.has(id));
-                      setSelected((prev) => {
-                        const next = new Set(prev);
-                        if (allSel) ids.forEach((id) => next.delete(id));
-                        else ids.forEach((id) => next.add(id));
-                        return next;
-                      });
-                    }}
-                    onToggleOne={toggleOne}
-                  />
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <RequestTable
-            rows={filtered}
-            isAdmin={isAdmin}
-            canBulkEdit={canBulkEdit}
-            selected={selected}
-            onToggleAll={toggleAll}
-            onToggleOne={toggleOne}
-          />
-        )}
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sorted.map((req) => {
+                    const deletable = ["DRAFT", "SUBMITTED", "CANCELLED"].includes(req.status);
+                    const canDel = isAdmin || (isOrgLead && deletable) || (req.submittedById === user?.id && deletable);
+                    return (
+                      <tr
+                        key={req.id}
+                        className={`hover:bg-paper/70 transition-colors cursor-pointer group ${selected.has(req.id) ? "bg-navy/3" : ""}`}
+                        onClick={() => (window.location.href = `/requests/${req.id}`)}
+                      >
+                        {canBulkEdit && (
+                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(req.id)}
+                              onChange={() => toggleOne(req.id)}
+                              className="rounded border-border"
+                            />
+                          </td>
+                        )}
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/requests/${req.id}`}
+                            className="font-mono text-xs text-navy hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {req.number}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 max-w-xs">
+                          <span className="font-medium text-ink truncate block">{req.title}</span>
+                          {req.vendorName && (
+                            <span className="text-xs text-ink-muted truncate block">{req.vendorName}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell">
+                          <StatusPill status={req.status} />
+                        </td>
+                        {budgets.length > 1 && (
+                          <td className="px-4 py-3 hidden lg:table-cell">
+                            {req.budget ? (
+                              <span className="text-xs font-medium text-ink-secondary">{req.budget.name}</span>
+                            ) : (
+                              <span className="text-xs text-ink-muted">—</span>
+                            )}
+                          </td>
+                        )}
+                        {isAdmin && (
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <span className="text-xs text-ink-secondary">{req.organization?.code}</span>
+                            {req.organization?.costCenter && (
+                              <span className="block text-xs text-ink-muted">CC: {req.organization.costCenter}</span>
+                            )}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-right hidden lg:table-cell">
+                          <span className="text-xs font-medium text-ink-secondary">
+                            {req.totalActual
+                              ? formatCurrency(req.totalActual)
+                              : req.totalEstimated
+                              ? formatCurrency(req.totalEstimated)
+                              : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right hidden md:table-cell">
+                          <span className="text-xs text-ink-muted">{formatDate(req.updatedAt)}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          {canDel && (
+                            <button
+                              onClick={(e) => handleDelete(req.id, e)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-muted hover:text-red-600 p-1 rounded"
+                              title="Delete request"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function RequestTable({
-  rows,
-  isAdmin,
-  canBulkEdit,
-  selected,
-  onToggleAll,
-  onToggleOne,
-  sectionLabel,
+function TabBtn({
+  children,
+  active,
+  onClick,
+  danger,
 }: {
-  rows: any[];
-  isAdmin: boolean;
-  canBulkEdit: boolean;
-  selected: Set<string>;
-  onToggleAll: () => void;
-  onToggleOne: (id: string) => void;
-  sectionLabel?: string;
+  children: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+  danger?: boolean;
 }) {
-  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
-
   return (
-    <div className="card p-0 overflow-hidden">
-      {sectionLabel && (
-        <div className="px-4 py-2 border-b border-border bg-paper/50">
-          <span className="text-xs font-semibold tracking-widest uppercase text-ink-muted">{sectionLabel}</span>
-        </div>
-      )}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-paper/50">
-            <tr>
-              {canBulkEdit && (
-                <th className="px-3 py-2.5 w-8">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={onToggleAll}
-                    className="rounded border-border"
-                  />
-                </th>
-              )}
-              <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted">
-                Number
-              </th>
-              <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted">
-                Title
-              </th>
-              <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">
-                Org
-              </th>
-              <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden lg:table-cell">
-                Budget
-              </th>
-              <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted">
-                Status
-              </th>
-              <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden lg:table-cell">
-                Amount
-              </th>
-              <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">
-                Date
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((req) => (
-              <tr
-                key={req.id}
-                className={`hover:bg-paper transition-colors cursor-pointer ${selected.has(req.id) ? "bg-navy/3" : ""}`}
-                onClick={() => (window.location.href = `/requests/${req.id}`)}
-              >
-                {canBulkEdit && (
-                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(req.id)}
-                      onChange={() => onToggleOne(req.id)}
-                      className="rounded border-border"
-                    />
-                  </td>
-                )}
-                <td className="px-4 py-3">
-                  <Link
-                    href={`/requests/${req.id}`}
-                    className="font-mono text-xs text-navy hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {req.number}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 max-w-xs">
-                  <span className="font-medium text-ink truncate block">{req.title}</span>
-                  {req.vendorName && (
-                    <span className="text-xs text-ink-muted truncate block">{req.vendorName}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 hidden md:table-cell">
-                  <span className="text-xs font-medium text-ink-secondary">{req.organization?.code}</span>
-                  {req.organization?.costCenter && (
-                    <span className="text-xs text-ink-muted block">CC: {req.organization.costCenter}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 hidden lg:table-cell">
-                  {req.budget ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                      {req.budget.name}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-ink-muted">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={req.status as RequestStatus} size="sm" />
-                </td>
-                <td className="px-4 py-3 text-right hidden lg:table-cell">
-                  <span className="text-xs text-ink-secondary font-medium">
-                    {req.totalActual
-                      ? formatCurrency(req.totalActual)
-                      : req.totalEstimated
-                      ? <span className="text-ink-muted">{formatCurrency(req.totalEstimated)}</span>
-                      : <span className="text-ink-muted">—</span>
-                    }
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right hidden md:table-cell">
-                  <span className="text-xs text-ink-muted">{formatDate(req.createdAt)}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <button
+      onClick={onClick}
+      className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+        active
+          ? danger
+            ? "border-red-500 text-red-600"
+            : "border-navy text-navy"
+          : "border-transparent text-ink-secondary hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
