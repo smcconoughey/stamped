@@ -3,67 +3,102 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(_req: NextRequest) {
+const TERMINAL = new Set(["RECEIVED", "PICKED_UP"]);
+
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const user = session.user as any;
-  const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
-  if (!isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const isAdminOrLead = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN", "ORG_LEAD"].includes(user.role);
+  if (!isAdminOrLead) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const { searchParams } = new URL(req.url);
+  const fiscalYear = searchParams.get("fy") ?? null;
+
+  const orgWhere: any = { tenantId: user.tenantId, active: true };
+
+  // ORG_LEAD: only their orgs
+  if (user.role === "ORG_LEAD") {
+    const memberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, memberRole: "LEAD" },
+      select: { organizationId: true },
+    });
+    orgWhere.id = { in: memberships.map((m: any) => m.organizationId) };
+  }
 
   const orgs = await prisma.organization.findMany({
-    where: { tenantId: user.tenantId, active: true },
+    where: orgWhere,
     include: {
-      budgets: { orderBy: [{ fiscalYear: "desc" }, { name: "asc" }] },
-      _count: { select: { requests: true } },
+      budgets: {
+        where: fiscalYear ? { fiscalYear } : undefined,
+        orderBy: [{ fiscalYear: "desc" }, { name: "asc" }],
+      },
     },
     orderBy: { name: "asc" },
   });
 
-  // For each budget, compute spent = sum of totalActual (or totalEstimated) for non-cancelled requests linked to it
-  const budgetIds = orgs.flatMap((o) => o.budgets.map((b) => b.id));
+  // Pull ALL non-cancelled requests for these orgs
+  const orgIds = orgs.map((o) => o.id);
+  const requests = await prisma.purchaseRequest.findMany({
+    where: { organizationId: { in: orgIds }, status: { not: "CANCELLED" } },
+    select: { organizationId: true, budgetId: true, status: true, totalActual: true, totalEstimated: true },
+  });
 
+  // Build per-budget spending maps
   const spentByBudget: Record<string, number> = {};
   const reservedByBudget: Record<string, number> = {};
+  // Track unlinked amounts per org (requests with no budgetId)
+  const unlinkedSpentByOrg: Record<string, number> = {};
+  const unlinkedReservedByOrg: Record<string, number> = {};
 
-  if (budgetIds.length) {
-    const linked = await prisma.purchaseRequest.groupBy({
-      by: ["budgetId", "status"],
-      where: {
-        budgetId: { in: budgetIds },
-        status: { not: "CANCELLED" },
-      },
-      _sum: { totalActual: true, totalEstimated: true },
-    });
+  for (const r of requests) {
+    const amt = (r.totalActual ?? 0) || (r.totalEstimated ?? 0);
+    if (!amt) continue;
+    const terminal = TERMINAL.has(r.status);
 
-    for (const row of linked) {
-      if (!row.budgetId) continue;
-      const amt = (row._sum.totalActual ?? 0) || (row._sum.totalEstimated ?? 0);
-      const terminal = ["RECEIVED", "PICKED_UP"].includes(row.status);
-      if (terminal) {
-        spentByBudget[row.budgetId] = (spentByBudget[row.budgetId] ?? 0) + amt;
-      } else {
-        reservedByBudget[row.budgetId] = (reservedByBudget[row.budgetId] ?? 0) + amt;
-      }
+    if (r.budgetId) {
+      if (terminal) spentByBudget[r.budgetId] = (spentByBudget[r.budgetId] ?? 0) + amt;
+      else          reservedByBudget[r.budgetId] = (reservedByBudget[r.budgetId] ?? 0) + amt;
+    } else {
+      // No budget linked — attribute to org pool
+      if (terminal) unlinkedSpentByOrg[r.organizationId] = (unlinkedSpentByOrg[r.organizationId] ?? 0) + amt;
+      else          unlinkedReservedByOrg[r.organizationId] = (unlinkedReservedByOrg[r.organizationId] ?? 0) + amt;
     }
   }
 
-  const result = orgs.map((org) => ({
-    id: org.id,
-    name: org.name,
-    code: org.code,
-    costCenter: org.costCenter,
-    department: org.department,
-    budgets: org.budgets.map((b) => ({
-      id: b.id,
-      name: b.name,
-      fiscalYear: b.fiscalYear,
-      allocated: b.allocated,
-      spent: spentByBudget[b.id] ?? 0,
-      reserved: reservedByBudget[b.id] ?? 0,
-      notes: b.notes,
-    })),
-  }));
+  // Collect all distinct fiscal years across all orgs (for FY selector)
+  const allFiscalYears = Array.from(
+    new Set(orgs.flatMap((o) => o.budgets.map((b) => b.fiscalYear))).values()
+  ).sort().reverse();
 
-  return NextResponse.json({ orgs: result });
+  const result = orgs.map((org) => {
+    const budgets = org.budgets;
+    const singleBudget = budgets.length === 1 ? budgets[0] : null;
+
+    return {
+      id: org.id,
+      name: org.name,
+      code: org.code,
+      costCenter: org.costCenter,
+      department: org.department,
+      budgets: budgets.map((b) => {
+        let spent = spentByBudget[b.id] ?? 0;
+        let reserved = reservedByBudget[b.id] ?? 0;
+
+        // If this is the only budget for the org, absorb all unlinked request amounts
+        if (singleBudget?.id === b.id) {
+          spent += unlinkedSpentByOrg[org.id] ?? 0;
+          reserved += unlinkedReservedByOrg[org.id] ?? 0;
+        }
+
+        return { id: b.id, name: b.name, fiscalYear: b.fiscalYear, allocated: b.allocated, spent, reserved, notes: b.notes };
+      }),
+      // Unlinked amounts that couldn't be attributed (only when multiple budgets exist)
+      unlinkedSpent: budgets.length !== 1 ? (unlinkedSpentByOrg[org.id] ?? 0) : 0,
+      unlinkedReserved: budgets.length !== 1 ? (unlinkedReservedByOrg[org.id] ?? 0) : 0,
+    };
+  });
+
+  return NextResponse.json({ orgs: result, fiscalYears: allFiscalYears });
 }
