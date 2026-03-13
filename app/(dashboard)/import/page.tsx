@@ -147,6 +147,13 @@ function ImportInner() {
     const t = searchParams.get("tab") as TabId | null;
     if (t && ["requests", "budgets", "members"].includes(t)) switchTab(t);
   }, []);
+
+  useEffect(() => {
+    if (tab !== "requests") return;
+    fetch("/api/budgets").then(r => r.json()).then(d => {
+      setAvailableBudgets((d.budgets ?? []).map((b: any) => ({ id: b.id, label: b.label })));
+    }).catch(() => {});
+  }, [tab]);
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
   const isOrgLead = user?.role === "ORG_LEAD";
 
@@ -163,6 +170,8 @@ function ImportInner() {
   const [results, setResults] = useState<ImportResults | null>(null);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [availableBudgets, setAvailableBudgets] = useState<{ id: string; label: string }[]>([]);
+  const [selectedBudgetId, setSelectedBudgetId] = useState("");
 
   const canImportBudgets = isAdmin;
   const canImportMembers = isAdmin || isOrgLead;
@@ -230,6 +239,7 @@ function ImportInner() {
     setAiMetadata({});
     setResults(null);
     setError("");
+    setSelectedBudgetId("");
   }
 
   async function runImport() {
@@ -247,7 +257,7 @@ function ImportInner() {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, metadata: aiMetadata }),
+        body: JSON.stringify({ rows, metadata: aiMetadata, ...(tab === "requests" && selectedBudgetId ? { forceBudgetId: selectedBudgetId } : {}) }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Import failed"); return; }
@@ -402,6 +412,22 @@ function ImportInner() {
                 </table>
               </div>
 
+              {tab === "requests" && availableBudgets.length > 0 && (
+                <div className="mt-3 flex items-center gap-3">
+                  <label className="text-sm font-medium text-ink whitespace-nowrap">Assign to budget:</label>
+                  <select
+                    value={selectedBudgetId}
+                    onChange={e => setSelectedBudgetId(e.target.value)}
+                    className="flex-1 border border-border rounded px-2 py-1.5 text-sm bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy"
+                  >
+                    <option value="">— auto-detect from spreadsheet —</option>
+                    {availableBudgets.map(b => (
+                      <option key={b.id} value={b.id}>{b.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex gap-3 mt-4">
                 <button
                   onClick={runImport}
@@ -411,7 +437,7 @@ function ImportInner() {
                   {importing ? "Importing..." : `Import ${rows.length} row${rows.length !== 1 ? "s" : ""}`}
                 </button>
                 <button
-                  onClick={() => { setRows([]); setFileName(""); setColorHints([]); setAiNormalized(false); setAiWarnings([]); }}
+                  onClick={() => { setRows([]); setFileName(""); setColorHints([]); setAiNormalized(false); setAiWarnings([]); setSelectedBudgetId(""); }}
                   className="px-4 py-2 border border-border rounded-md text-sm text-ink-secondary hover:bg-paper"
                 >
                   Clear

@@ -202,14 +202,9 @@ export async function PATCH(req: NextRequest) {
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
   const isOrgLead = user.role === "ORG_LEAD";
 
-  const { ids, status } = await req.json();
-  if (!ids?.length || !status) {
-    return NextResponse.json({ error: "ids and status required" }, { status: 400 });
-  }
-
-  const VALID_STATUSES = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP","PICKED_UP","CANCELLED"];
-  if (!VALID_STATUSES.includes(status)) {
-    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+  const { ids, status, budgetId } = await req.json();
+  if (!ids?.length || (!status && budgetId === undefined)) {
+    return NextResponse.json({ error: "ids and status or budgetId required" }, { status: 400 });
   }
 
   // Build ownership filter
@@ -222,6 +217,20 @@ export async function PATCH(req: NextRequest) {
       select: { organizationId: true },
     });
     ownerWhere.organizationId = { in: leadMemberships.map((m: { organizationId: string }) => m.organizationId) };
+  }
+
+  // Budget assignment
+  if (budgetId !== undefined) {
+    const updated = await prisma.purchaseRequest.updateMany({
+      where: ownerWhere,
+      data: { budgetId: budgetId || null },
+    });
+    return NextResponse.json({ updated: updated.count });
+  }
+
+  const VALID_STATUSES = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP","PICKED_UP","CANCELLED"];
+  if (!VALID_STATUSES.includes(status)) {
+    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
   const now = new Date();

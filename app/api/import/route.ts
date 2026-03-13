@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { rows, metadata = {} } = body; // Array of CSV row objects + spreadsheet metadata
+    const { rows, metadata = {}, forceBudgetId } = body; // Array of CSV row objects + spreadsheet metadata
 
     if (!rows || !Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json({ error: "No data rows provided" }, { status: 400 });
@@ -220,11 +220,16 @@ export async function POST(req: NextRequest) {
         const advisorEmail = col(row, "advisor_email", "contact_email", "e_mail_address", "email_address", "email");
         const advisorName = col(row, "advisor_name", "person_to_contact_for_order", "person_to_contact", "contact_person", "ordered_by", "contact");
 
-        // Resolve budget — from explicit budget_name column or row-level metadata
-        const budgetNameRaw = col(row, "budget_name", "budget", "cost_center", "fund", "account");
-        const budgetId = budgetNameRaw
-          ? budgetByOrgAndName[`${orgId}:${budgetNameRaw.toLowerCase()}`] ?? null
-          : null;
+        // Resolve budget — forceBudgetId from import UI takes priority; else from row column
+        let budgetId: string | null = null;
+        if (forceBudgetId) {
+          budgetId = forceBudgetId;
+        } else {
+          const budgetNameRaw = col(row, "budget_name", "budget", "cost_center", "fund", "account");
+          budgetId = budgetNameRaw
+            ? budgetByOrgAndName[`${orgId}:${budgetNameRaw.toLowerCase()}`] ?? null
+            : null;
+        }
 
         await prisma.purchaseRequest.create({
           data: {
