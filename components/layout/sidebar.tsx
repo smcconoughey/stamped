@@ -52,7 +52,7 @@ const navigation: NavGroup[] = [
   {
     section: "Finance",
     items: [
-      { label: "Budgets", href: "/finance/budgets", financeOnly: true },
+      { label: "Budgets", href: "/finance/budgets", orgLeadAllowed: true },
       { label: "Reports", href: "/finance/reports", financeOnly: true },
     ],
   },
@@ -103,6 +103,7 @@ export function Sidebar() {
             if (item.adminOnly && !isAdmin) return false;
             if (item.financeOnly && !isFinance) return false;
             if (item.orgLeadOnly && !isOrgLead) return false;
+            if (item.orgLeadAllowed && !isAdmin && !isFinance && !isOrgLead) return false;
             return true;
           });
 

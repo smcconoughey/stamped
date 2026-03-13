@@ -247,7 +247,7 @@ function ImportInner() {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
+        body: JSON.stringify({ rows, metadata: aiMetadata }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Import failed"); return; }

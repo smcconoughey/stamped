@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { rows } = body; // Array of CSV row objects
+    const { rows, metadata = {} } = body; // Array of CSV row objects + spreadsheet metadata
 
     if (!rows || !Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json({ error: "No data rows provided" }, { status: 400 });
@@ -78,6 +78,29 @@ export async function POST(req: NextRequest) {
       orgByCode[org.code.toLowerCase()] = org.id;
       for (const budget of (org as any).budgets) {
         budgetByOrgAndName[`${org.id}:${budget.name.toLowerCase()}`] = budget.id;
+      }
+    }
+
+    // Pre-resolve the org for this import (used for budget auto-creation)
+    const metaOrgKey = (metadata.organization || "").toLowerCase().trim();
+    const metaOrgId: string | null =
+      orgByName[metaOrgKey] || orgByCode[metaOrgKey] ||
+      (allowedOrgIds?.length ? allowedOrgIds[0] : null) || null;
+
+    // Auto-upsert budget from spreadsheet metadata if we have enough info
+    const metaBudgetName: string = metadata.budget_name || metadata.cost_center || "";
+    const metaFiscalYear: string = metadata.fiscal_year || new Date().getFullYear().toString();
+    const metaAllocated: number = parseFloat(metadata.budget_total?.replace(/[^0-9.]/g, "") || "0") || 0;
+
+    if (metaOrgId && metaBudgetName) {
+      const cacheKey = `${metaOrgId}:${metaBudgetName.toLowerCase()}`;
+      if (!budgetByOrgAndName[cacheKey]) {
+        const upserted = await prisma.budget.upsert({
+          where: { organizationId_fiscalYear_name: { organizationId: metaOrgId, fiscalYear: metaFiscalYear, name: metaBudgetName } },
+          create: { organizationId: metaOrgId, name: metaBudgetName, fiscalYear: metaFiscalYear, allocated: metaAllocated },
+          update: metaAllocated > 0 ? { allocated: metaAllocated } : {},
+        });
+        budgetByOrgAndName[cacheKey] = upserted.id;
       }
     }
 
