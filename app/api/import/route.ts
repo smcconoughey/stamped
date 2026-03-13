@@ -93,12 +93,24 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       try {
-        // Try to find organization
+        // Try to find organization by exact name or code
         const orgKey = (row.organization || row.org || row.club || "").toLowerCase().trim();
         let orgId = orgByName[orgKey] || orgByCode[orgKey];
 
-        // If org not found by name/code and ORG_LEAD has exactly one org, default to it
-        if (!orgId && allowedOrgIds?.length === 1) {
+        // Try partial match if exact fails (e.g. "ERPL" matches "ERPL Robotics" or vice versa)
+        if (!orgId && orgKey) {
+          const partialMatch = Object.keys(orgByName).find((k) => k.includes(orgKey) || orgKey.includes(k));
+          if (partialMatch) orgId = orgByName[partialMatch];
+          if (!orgId) {
+            const codeMatch = Object.keys(orgByCode).find((k) => k.includes(orgKey) || orgKey.includes(k));
+            if (codeMatch) orgId = orgByCode[codeMatch];
+          }
+        }
+
+        // If org key is blank or still not found, fall back:
+        // - ORG_LEAD with exactly one org → use that org
+        // - ORG_LEAD with multiple orgs but no org specified → use first allowed org
+        if (!orgId && allowedOrgIds) {
           orgId = allowedOrgIds[0];
         }
 
@@ -116,12 +128,12 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Field extraction — covers raw column names AND AI-normalized names ──
-        const title = col(row,
-          "title", "name", "item", "item_name",
-          "brief_description", "description", "brief_desc", "item_description"
-        );
+        const title =
+          col(row, "title", "name", "item", "item_name", "brief_description", "description", "brief_desc", "item_description") ||
+          col(row, "vendor", "vendor_name", "supplier", "store", "source") ||  // use vendor as fallback title
+          null;
+
         if (!title) {
-          results.errors.push(`Row ${i + 1}: Missing title/item name`);
           results.skipped++;
           continue;
         }

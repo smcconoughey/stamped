@@ -56,9 +56,14 @@ export async function POST(req: NextRequest) {
 
       return out;
     })
-    // Drop rows that are clearly metadata/empty (no title/description mapped)
+    // Drop rows that are clearly metadata/empty
     .filter((row: Record<string, string>) => {
-      if (type === "requests") return !!(row.title || row.description);
+      if (type === "requests") {
+        // Keep if has a title, OR has any financial/date data that makes it a real purchase row
+        const hasTitle = !!(row.title || row.description);
+        const hasData = !!(row.total_actual || row.unit_price || row.date_ordered || row.date_received || row.vendor);
+        return hasTitle || hasData;
+      }
       if (type === "budgets") return !!(row.organization && row.allocated);
       if (type === "members") return !!row.email;
       return true;
