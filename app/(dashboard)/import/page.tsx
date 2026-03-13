@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import * as XLSX from "xlsx";
 
@@ -91,9 +92,15 @@ function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[] }
   });
 }
 
-export default function ImportPage() {
+function ImportInner() {
   const { data: session } = useSession();
   const user = session?.user as any;
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const t = searchParams.get("tab") as TabId | null;
+    if (t && ["requests", "budgets", "members"].includes(t)) switchTab(t);
+  }, []);
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
   const isOrgLead = user?.role === "ORG_LEAD";
 
@@ -385,4 +392,8 @@ export default function ImportPage() {
       </div>
     </div>
   );
+}
+
+export default function ImportPage() {
+  return <Suspense><ImportInner /></Suspense>;
 }
