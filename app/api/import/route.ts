@@ -12,9 +12,23 @@ export async function POST(req: NextRequest) {
 
   const user = session.user as any;
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+  const isOrgLead = user.role === "ORG_LEAD";
 
-  if (!isAdmin) {
+  if (!isAdmin && !isOrgLead) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // ORG_LEAD can only import into orgs they lead
+  let allowedOrgIds: string[] | null = null;
+  if (isOrgLead) {
+    const memberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, memberRole: "LEAD" },
+      select: { organizationId: true },
+    });
+    allowedOrgIds = memberships.map((m: { organizationId: string }) => m.organizationId);
+    if (allowedOrgIds.length === 0) {
+      return NextResponse.json({ error: "You are not a lead of any organization" }, { status: 403 });
+    }
   }
 
   try {
@@ -56,8 +70,20 @@ export async function POST(req: NextRequest) {
         const orgKey = (row.organization || row.org || row.club || "").toLowerCase().trim();
         let orgId = orgByName[orgKey] || orgByCode[orgKey];
 
+        // If org not found by name/code and ORG_LEAD has exactly one org, default to it
+        if (!orgId && allowedOrgIds?.length === 1) {
+          orgId = allowedOrgIds[0];
+        }
+
         if (!orgId) {
           results.errors.push(`Row ${i + 1}: Organization "${orgKey}" not found`);
+          results.skipped++;
+          continue;
+        }
+
+        // ORG_LEAD can only import into their own orgs
+        if (allowedOrgIds && !allowedOrgIds.includes(orgId)) {
+          results.errors.push(`Row ${i + 1}: You do not have lead access to that organization`);
           results.skipped++;
           continue;
         }
@@ -72,25 +98,45 @@ export async function POST(req: NextRequest) {
         currentNum++;
         const number = generateRequestNumber(prefix, currentNum);
 
-        const unitPrice = parseFloat(row.unit_price || row.price || row.cost || 0);
-        const quantity = parseInt(row.quantity || row.qty || 1);
-        const totalEstimated = unitPrice * quantity;
+        const unitPrice = parseFloat(row.unit_price || row.price || row.cost || "0") || null;
+        const quantity = parseInt(row.quantity || row.qty || "1") || 1;
+        const totalActual = parseFloat(row.total_actual || row.amount || row.invoice_amount || "0") || null;
+        const totalEstimated = unitPrice ? unitPrice * quantity : totalActual;
+
+        // Status: use explicit status field, or infer from date columns
+        const VALID_STATUSES = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP","PICKED_UP","CANCELLED"];
+        let status = "DRAFT";
+        if (row.status && VALID_STATUSES.includes(row.status.toUpperCase())) {
+          status = row.status.toUpperCase();
+        } else if (row.date_received || row.received_at) {
+          status = "RECEIVED";
+        } else if (row.date_ordered || row.ordered_at) {
+          status = "ORDERED";
+        }
+
+        const orderedAt = row.date_ordered || row.ordered_at ? new Date(row.date_ordered || row.ordered_at) : null;
+        const receivedAt = row.date_received || row.received_at ? new Date(row.date_received || row.received_at) : null;
 
         await prisma.purchaseRequest.create({
           data: {
             number,
             title,
             description: row.description || null,
-            justification: row.justification || row.reason || "Imported from CSV",
+            justification: row.justification || row.reason || "Imported from spreadsheet",
             organizationId: orgId,
             submittedById: user.id,
-            advisorEmail: row.advisor_email || row.advisor || "tbd@university.edu",
-            advisorName: row.advisor_name || null,
-            vendorName: row.vendor || row.vendor_name || null,
-            status: "DRAFT",
+            advisorEmail: row.advisor_email || row.contact_email || "tbd@university.edu",
+            advisorName: row.advisor_name || row.person_to_contact || null,
+            vendorName: row.vendor || row.vendor_name || row.supplier || null,
+            vendorUrl: row.url || row.link || row.weblink || null,
+            notes: row.notes || row.comments || null,
+            status,
             priority: (row.priority || "NORMAL").toUpperCase(),
             totalEstimated: totalEstimated || null,
+            totalActual: totalActual || null,
             neededBy: row.needed_by ? new Date(row.needed_by) : null,
+            orderedAt: orderedAt && !isNaN(orderedAt.getTime()) ? orderedAt : null,
+            receivedAt: receivedAt && !isNaN(receivedAt.getTime()) ? receivedAt : null,
             items: title
               ? {
                   create: [

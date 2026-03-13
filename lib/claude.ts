@@ -164,6 +164,8 @@ export async function parseImportRows(
 ): Promise<{
   columnMapping: Record<string, string | null>;
   colorStatusMapping: Record<string, string>;
+  statusInference: string;
+  metadata: Record<string, string>;
   warnings: string[];
 }> {
   const schema = IMPORT_SCHEMAS[type];
@@ -174,41 +176,59 @@ export async function parseImportRows(
 
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
+    max_tokens: 1536,
     messages: [{
       role: "user",
-      content: `You are normalizing a spreadsheet import for a university purchasing system.
+      content: `You are normalizing a university student organization spreadsheet for import into a purchasing system.
 
 Import type: ${type}
-Expected fields: ${schema.fields.join(", ")}
+Expected output fields: ${schema.fields.join(", ")}
 ${schema.statusValues.length ? `Valid status values: ${schema.statusValues.join(", ")}` : ""}
-${schema.priorityValues.length ? `Valid priority values: ${schema.priorityValues.join(", ")}` : ""}
 
-Column headers in the uploaded file:
+IMPORTANT: These spreadsheets often have metadata rows at the top (org name, budget total, cost center, project number) BEFORE the actual column headers. The real header row is the one with column labels like "Supplier", "Description", "QTY", "Price", "Date Ordered", etc.
+
+Column headers found (may include metadata rows):
 ${headers.join(", ")}
 
-Sample rows (first ${Math.min(5, sampleRows.length)}):
-${JSON.stringify(sampleRows.slice(0, 5), null, 2)}
+Sample rows (first ${Math.min(8, sampleRows.length)}):
+${JSON.stringify(sampleRows.slice(0, 8), null, 2)}
 ${colorSection}
 
-Return ONLY valid JSON (no markdown, no explanation):
+Mapping rules (be liberal):
+- "Supplier" / "Vendor" / "Store" → "vendor"
+- "Brief Description" / "Item" / "Description" / "Item Name" → "title"
+- "QTY" / "Qty." / "Quantity" → "quantity"
+- "Price Each" / "Unit Price" / "$ each" / "Cost" → "unit_price"
+- "$ amount" / "Invoice" / "Total" / "Amount" → "total_actual"
+- "Running Total" / "Balance" / "Running Balance" → null (ignore, it's a calculated field)
+- "Weblink" / "URL" / "Link" / "Comments" → "url" (if it looks like a URL column)
+- "Notes" / "Comments" / "Description" (secondary) → "notes"
+- "Date Ordered" / "Order Date" / "Ordered" → "date_ordered"
+- "Date Received" / "Received" / "Delivered" → "date_received"
+- "Person to contact" / "Contact" / "Ordered By" → "advisor_name"
+- "E-mail" / "Email" / "Contact Email" → "advisor_email"
+- "Organization" / "Club" / "Org" / "Department" → "organization"
+
+Status inference (if no explicit status column):
+- If "date_received" is filled AND "date_ordered" is filled → RECEIVED
+- If "date_ordered" is filled but no "date_received" → ORDERED
+- If neither date → DRAFT
+Set "status_inference" to one of: "from_column", "from_dates", "default_draft"
+
+Return ONLY valid JSON:
 {
   "column_mapping": { "original_header": "expected_field_name_or_null" },
   "color_status_mapping": { "hex_color": "STATUS_VALUE" },
-  "warnings": ["any issues noticed"]
-}
-
-Rules:
-- Map each original header to the closest expected field, or null if irrelevant
-- For color_status_mapping only include colors actually present in the data
-- If a column contains status-like text (Ordered/Done/Complete/Received), map it to "status"
-- Be liberal with matching: "Item Name"→"title", "Club"→"organization", "$ each"→"unit_price", "Qty"→"quantity", "Advisor"→"advisor_email"`,
+  "status_inference": "from_column|from_dates|default_draft",
+  "metadata": { "organization": "...", "budget_total": "...", "cost_center": "...", "fiscal_year": "..." },
+  "warnings": ["any issues noticed, e.g. missing required columns"]
+}`,
     }],
   });
 
   const text = response.content.find(b => b.type === "text");
   if (!text || text.type !== "text") {
-    return { columnMapping: {}, colorStatusMapping: {}, warnings: ["AI parsing unavailable"] };
+    return { columnMapping: {}, colorStatusMapping: {}, statusInference: "default_draft", metadata: {}, warnings: ["AI parsing unavailable"] };
   }
 
   try {
@@ -216,10 +236,12 @@ Rules:
     return {
       columnMapping: json.column_mapping ?? {},
       colorStatusMapping: json.color_status_mapping ?? {},
+      statusInference: json.status_inference ?? "default_draft",
+      metadata: json.metadata ?? {},
       warnings: json.warnings ?? [],
     };
   } catch {
-    return { columnMapping: {}, colorStatusMapping: {}, warnings: ["Could not parse AI response"] };
+    return { columnMapping: {}, colorStatusMapping: {}, statusInference: "default_draft", metadata: {}, warnings: ["Could not parse AI response"] };
   }
 }
 

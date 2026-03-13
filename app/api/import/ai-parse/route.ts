@@ -16,33 +16,46 @@ export async function POST(req: NextRequest) {
   const headers = Object.keys(rows[0] ?? {});
 
   // Get column mapping + color→status mapping from Haiku
-  const { columnMapping, colorStatusMapping, warnings } = await parseImportRows(
+  const { columnMapping, colorStatusMapping, statusInference, metadata, warnings } = await parseImportRows(
     headers,
     rows,
     colorHints ?? [],
     type
   );
 
-  // Apply mapping to all rows
-  const normalized = rows.map((row: Record<string, string>, idx: number) => {
-    const out: Record<string, string> = {};
+  // Apply mapping to all rows, skipping rows with no meaningful mapped content
+  const normalized = rows
+    .map((row: Record<string, string>, idx: number) => {
+      const out: Record<string, string> = {};
 
-    for (const [origCol, targetField] of Object.entries(columnMapping)) {
-      if (targetField && row[origCol] !== undefined) {
-        out[targetField as string] = row[origCol];
+      for (const [origCol, targetField] of Object.entries(columnMapping)) {
+        if (targetField && row[origCol] !== undefined && row[origCol] !== "") {
+          out[targetField as string] = row[origCol];
+        }
       }
-    }
 
-    // Apply color-based status if no status already set
-    if (type === "requests" && !out.status) {
-      const rowColor = colorHints?.find((h: { row: number; color: string }) => h.row === idx)?.color;
-      if (rowColor && colorStatusMapping[rowColor]) {
-        out.status = colorStatusMapping[rowColor];
+      // Fill org from metadata if not present
+      if (!out.organization && metadata.organization) {
+        out.organization = metadata.organization;
       }
-    }
 
-    return out;
-  });
+      // Apply color-based status if no explicit status
+      if (type === "requests" && !out.status) {
+        const rowColor = colorHints?.find((h: { row: number; color: string }) => h.row === idx)?.color;
+        if (rowColor && colorStatusMapping[rowColor]) {
+          out.status = colorStatusMapping[rowColor];
+        }
+      }
 
-  return NextResponse.json({ rows: normalized, columnMapping, colorStatusMapping, warnings });
+      return out;
+    })
+    // Drop rows that are clearly metadata/empty (no title/description mapped)
+    .filter((row: Record<string, string>) => {
+      if (type === "requests") return !!(row.title || row.description);
+      if (type === "budgets") return !!(row.organization && row.allocated);
+      if (type === "members") return !!row.email;
+      return true;
+    });
+
+  return NextResponse.json({ rows: normalized, columnMapping, colorStatusMapping, statusInference, metadata, warnings });
 }

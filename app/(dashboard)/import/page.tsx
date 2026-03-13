@@ -103,6 +103,7 @@ export default function ImportPage() {
   const [colorHints, setColorHints] = useState<ColorHint[]>([]);
   const [aiNormalized, setAiNormalized] = useState(false);
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
+  const [aiMetadata, setAiMetadata] = useState<Record<string, string>>({});
   const [normalizing, setNormalizing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -143,6 +144,7 @@ export default function ImportPage() {
       setRows(data.rows);
       setAiNormalized(true);
       setAiWarnings(data.warnings ?? []);
+      setAiMetadata(data.metadata ?? {});
     } catch {
       setError("AI normalization failed. You can still import using the raw columns.");
     } finally {
@@ -170,6 +172,7 @@ export default function ImportPage() {
     setColorHints([]);
     setAiNormalized(false);
     setAiWarnings([]);
+    setAiMetadata({});
     setResults(null);
     setError("");
   }
@@ -214,6 +217,7 @@ export default function ImportPage() {
           {(["requests", "budgets", "members"] as TabId[]).map(t => {
             if (t === "budgets" && !canImportBudgets) return null;
             if (t === "members" && !canImportMembers) return null;
+            if (t === "requests" && !isAdmin && !isOrgLead) return null;
             return (
               <button
                 key={t}
@@ -296,6 +300,16 @@ export default function ImportPage() {
                   </button>
                 )}
               </div>
+
+              {Object.keys(aiMetadata).filter(k => aiMetadata[k]).length > 0 && (
+                <div className="mb-3 px-3 py-2 bg-navy/5 border border-navy/20 rounded text-xs text-ink space-y-0.5">
+                  <p className="font-semibold text-navy mb-1">Detected from spreadsheet</p>
+                  {aiMetadata.organization && <p>Organization: <strong>{aiMetadata.organization}</strong></p>}
+                  {aiMetadata.budget_total && <p>Budget total: <strong>${aiMetadata.budget_total}</strong></p>}
+                  {aiMetadata.cost_center && <p>Cost center: <strong>{aiMetadata.cost_center}</strong></p>}
+                  {aiMetadata.fiscal_year && <p>Fiscal year: <strong>{aiMetadata.fiscal_year}</strong></p>}
+                </div>
+              )}
 
               {aiWarnings.length > 0 && (
                 <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 space-y-0.5">
