@@ -18,6 +18,10 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
   if ((session.user as any).role === "PLATFORM_ADMIN") redirect("/platform");
 
+  const userId = (session.user as any).id;
+  const dbUser = await prisma.user.findUnique({ where: { id: userId }, select: { onboarded: true } });
+  if (!dbUser?.onboarded) redirect("/onboard");
+
   return (
     <div className="flex h-screen overflow-hidden bg-paper">
       <Sidebar />

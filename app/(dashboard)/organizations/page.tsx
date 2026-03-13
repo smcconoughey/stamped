@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
+import Link from "next/link";
 
 export default async function OrganizationsPage() {
   const session = await getServerSession(authOptions);
@@ -83,7 +84,7 @@ export default async function OrganizationsPage() {
                   return (
                     <tr key={org.id} className="hover:bg-paper transition-colors">
                       <td className="px-4 py-3">
-                        <p className="font-medium text-ink">{org.name}</p>
+                        <Link href={`/organizations/${org.id}`} className="font-medium text-ink hover:text-navy">{org.name}</Link>
                         {org.department && (
                           <p className="text-xs text-ink-muted">{org.department}</p>
                         )}
