@@ -66,13 +66,19 @@ export async function POST(req: NextRequest) {
 
     const orgs = await prisma.organization.findMany({
       where: { tenantId: user.tenantId, active: true },
+      include: { budgets: true },
     });
 
     const orgByName: Record<string, string> = {};
     const orgByCode: Record<string, string> = {};
+    // Map "orgId:budgetName.toLowerCase()" → budgetId for fast lookup
+    const budgetByOrgAndName: Record<string, string> = {};
     for (const org of orgs) {
       orgByName[org.name.toLowerCase()] = org.id;
       orgByCode[org.code.toLowerCase()] = org.id;
+      for (const budget of (org as any).budgets) {
+        budgetByOrgAndName[`${org.id}:${budget.name.toLowerCase()}`] = budget.id;
+      }
     }
 
     const results = {
@@ -159,6 +165,12 @@ export async function POST(req: NextRequest) {
         const advisorEmail = col(row, "advisor_email", "contact_email", "e_mail_address", "email_address", "email");
         const advisorName = col(row, "advisor_name", "person_to_contact_for_order", "person_to_contact", "contact_person", "ordered_by", "contact");
 
+        // Resolve budget — from explicit budget_name column or row-level metadata
+        const budgetNameRaw = col(row, "budget_name", "budget", "cost_center", "fund", "account");
+        const budgetId = budgetNameRaw
+          ? budgetByOrgAndName[`${orgId}:${budgetNameRaw.toLowerCase()}`] ?? null
+          : null;
+
         await prisma.purchaseRequest.create({
           data: {
             number,
@@ -166,6 +178,7 @@ export async function POST(req: NextRequest) {
             description: col(row, "description") || null,
             justification: col(row, "justification", "reason", "purpose") || "Imported from spreadsheet",
             organizationId: orgId,
+            budgetId: budgetId || undefined,
             submittedById: user.id,
             advisorEmail: advisorEmail || "tbd@university.edu",
             advisorName: advisorName || null,

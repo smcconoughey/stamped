@@ -40,6 +40,12 @@ export async function POST(req: NextRequest) {
         out.organization = metaOrg;
       }
 
+      // Fill budget_name from metadata cost_center if not already in row
+      const metaBudget = knownMetadata?.budget_name || knownMetadata?.cost_center || metadata.cost_center;
+      if (!out.budget_name && metaBudget) {
+        out.budget_name = metaBudget;
+      }
+
       // Apply color-based status if no explicit status
       if (type === "requests" && !out.status) {
         const rowColor = colorHints?.find((h: { row: number; color: string }) => h.row === idx)?.color;

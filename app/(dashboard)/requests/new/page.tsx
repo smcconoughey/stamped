@@ -27,11 +27,13 @@ export default function NewRequestPage() {
   const user = session?.user as any;
 
   const [orgs, setOrgs] = useState<any[]>([]);
+  const [orgBudgets, setOrgBudgets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [form, setForm] = useState({
     organizationId: "",
+    budgetId: "",
     title: "",
     description: "",
     justification: "",
@@ -64,6 +66,14 @@ export default function NewRequestPage() {
   function setField(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
     if (errors[key]) setErrors((e) => ({ ...e, [key]: "" }));
+    // When org changes, load its budgets
+    if (key === "organizationId" && value) {
+      fetch(`/api/organizations/${value}`)
+        .then((r) => r.json())
+        .then((d) => setOrgBudgets(d.organization?.budgets || []))
+        .catch(() => setOrgBudgets([]));
+      setForm((f) => ({ ...f, organizationId: value, budgetId: "" }));
+    }
   }
 
   function updateItem(id: string, key: keyof LineItem, value: string) {
@@ -152,20 +162,38 @@ export default function NewRequestPage() {
             Request Information
           </h2>
 
-          <Select
-            label="Organization *"
-            id="organizationId"
-            value={form.organizationId}
-            onChange={(e) => setField("organizationId", e.target.value)}
-            error={errors.organizationId}
-          >
-            <option value="">Select organization...</option>
-            {orgs.map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name} ({org.code})
-              </option>
-            ))}
-          </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Organization *"
+              id="organizationId"
+              value={form.organizationId}
+              onChange={(e) => setField("organizationId", e.target.value)}
+              error={errors.organizationId}
+            >
+              <option value="">Select organization...</option>
+              {orgs.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name} ({org.code})
+                </option>
+              ))}
+            </Select>
+
+            {orgBudgets.length > 0 && (
+              <Select
+                label="Budget / Cost Center"
+                id="budgetId"
+                value={form.budgetId}
+                onChange={(e) => setField("budgetId", e.target.value)}
+              >
+                <option value="">No budget selected</option>
+                {orgBudgets.map((b: any) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.fiscalYear})
+                  </option>
+                ))}
+              </Select>
+            )}
+          </div>
 
           <Input
             label="Request Title *"

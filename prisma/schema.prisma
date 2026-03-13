@@ -144,6 +144,8 @@ model Budget {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  requests PurchaseRequest[]
+
   @@unique([organizationId, fiscalYear, name])
 }
 
@@ -159,6 +161,8 @@ model PurchaseRequest {
   submittedBy    User         @relation("Submitted", fields: [submittedById], references: [id])
   assignedToId   String?
   assignedTo     User?        @relation("Assigned", fields: [assignedToId], references: [id])
+  budgetId       String?
+  budget         Budget?      @relation(fields: [budgetId], references: [id])
 
   status   String @default("DRAFT")
   priority String @default("NORMAL")

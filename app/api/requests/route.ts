@@ -19,13 +19,24 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(searchParams.get("limit") || "50");
 
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+  const isOrgLead = user.role === "ORG_LEAD";
 
   const where: any = {
     organization: { tenantId: user.tenantId },
   };
 
-  // Non-admins can only see their own requests
-  if (!isAdmin) {
+  if (isAdmin) {
+    // admins see everything
+  } else if (isOrgLead) {
+    // org leads see all requests for orgs they lead
+    const leadMemberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, memberRole: "LEAD" },
+      select: { organizationId: true },
+    });
+    const leadOrgIds = leadMemberships.map((m: { organizationId: string }) => m.organizationId);
+    where.organizationId = { in: leadOrgIds };
+  } else {
+    // regular students see only their own
     where.submittedById = user.id;
   }
 
@@ -52,7 +63,8 @@ export async function GET(req: NextRequest) {
   const requests = await prisma.purchaseRequest.findMany({
     where,
     include: {
-      organization: { select: { id: true, name: true, code: true } },
+      organization: { select: { id: true, name: true, code: true, costCenter: true } },
+      budget: { select: { id: true, name: true, fiscalYear: true } },
       submittedBy: { select: { id: true, name: true, email: true } },
       assignedTo: { select: { id: true, name: true, email: true } },
       items: true,
@@ -79,6 +91,7 @@ export async function POST(req: NextRequest) {
     description,
     justification,
     organizationId,
+    budgetId,
     advisorEmail,
     advisorName,
     vendorName,
@@ -132,6 +145,7 @@ export async function POST(req: NextRequest) {
       description,
       justification,
       organizationId,
+      budgetId: budgetId || undefined,
       submittedById: user.id,
       advisorEmail,
       advisorName,
@@ -177,4 +191,51 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({ request }, { status: 201 });
+}
+
+// Bulk update (status change for multiple requests)
+export async function PATCH(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const user = session.user as any;
+  const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+  const isOrgLead = user.role === "ORG_LEAD";
+
+  const { ids, status } = await req.json();
+  if (!ids?.length || !status) {
+    return NextResponse.json({ error: "ids and status required" }, { status: 400 });
+  }
+
+  const VALID_STATUSES = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP","PICKED_UP","CANCELLED"];
+  if (!VALID_STATUSES.includes(status)) {
+    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+  }
+
+  // Build ownership filter
+  const ownerWhere: any = { id: { in: ids }, organization: { tenantId: user.tenantId } };
+  if (!isAdmin && !isOrgLead) {
+    ownerWhere.submittedById = user.id;
+  } else if (isOrgLead) {
+    const leadMemberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, memberRole: "LEAD" },
+      select: { organizationId: true },
+    });
+    ownerWhere.organizationId = { in: leadMemberships.map((m: { organizationId: string }) => m.organizationId) };
+  }
+
+  const now = new Date();
+  const dateField: Record<string, any> = {
+    ORDERED: { orderedAt: now },
+    RECEIVED: { receivedAt: now },
+    READY_FOR_PICKUP: { readyAt: now },
+    PICKED_UP: { pickedUpAt: now },
+  };
+
+  const updated = await prisma.purchaseRequest.updateMany({
+    where: ownerWhere,
+    data: { status, ...(dateField[status] || {}) },
+  });
+
+  return NextResponse.json({ updated: updated.count });
 }
