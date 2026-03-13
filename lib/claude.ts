@@ -136,6 +136,93 @@ Respond in JSON:
   }
 }
 
+// ── Import parsing with Haiku ─────────────────────────────────────────────────
+
+const IMPORT_SCHEMAS = {
+  requests: {
+    fields: ["organization", "title", "description", "justification", "advisor_email", "advisor_name", "vendor", "quantity", "unit_price", "url", "priority", "status", "needed_by", "notes"],
+    statusValues: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "READY_FOR_PICKUP", "PICKED_UP", "CANCELLED"],
+    priorityValues: ["LOW", "NORMAL", "HIGH", "URGENT"],
+  },
+  budgets: {
+    fields: ["organization", "budget_name", "fiscal_year", "allocated", "notes"],
+    statusValues: [] as string[],
+    priorityValues: [] as string[],
+  },
+  members: {
+    fields: ["email", "name", "role", "organization"],
+    statusValues: [] as string[],
+    priorityValues: [] as string[],
+  },
+};
+
+export async function parseImportRows(
+  headers: string[],
+  sampleRows: Record<string, string>[],
+  colorHints: Array<{ row: number; color: string }>,
+  type: "requests" | "budgets" | "members"
+): Promise<{
+  columnMapping: Record<string, string | null>;
+  colorStatusMapping: Record<string, string>;
+  warnings: string[];
+}> {
+  const schema = IMPORT_SCHEMAS[type];
+
+  const colorSection = colorHints.length > 0
+    ? `\nRow color highlights (row index → dominant fill color hex):\n${JSON.stringify(colorHints.slice(0, 20))}\n\nCommon spreadsheet color conventions for purchase tracking:\n- Green shades (#70AD47, #92D050, #00B050, light greens) → RECEIVED or PICKED_UP\n- Yellow/gold (#FFD966, #FFC000, #FFFF00, #FFF2CC) → ORDERED or IN_PROGRESS\n- Orange (#F4B183, #FF9900, #FCE4D6) → PARTIALLY_RECEIVED\n- Red (#FF7676, #FF0000, #FFCCCC, #FFC7CE) → CANCELLED\n- Blue (#4472C4, #9DC3E6, #DDEBF7) → APPROVED\n- White / no color → DRAFT or SUBMITTED`
+    : "";
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    messages: [{
+      role: "user",
+      content: `You are normalizing a spreadsheet import for a university purchasing system.
+
+Import type: ${type}
+Expected fields: ${schema.fields.join(", ")}
+${schema.statusValues.length ? `Valid status values: ${schema.statusValues.join(", ")}` : ""}
+${schema.priorityValues.length ? `Valid priority values: ${schema.priorityValues.join(", ")}` : ""}
+
+Column headers in the uploaded file:
+${headers.join(", ")}
+
+Sample rows (first ${Math.min(5, sampleRows.length)}):
+${JSON.stringify(sampleRows.slice(0, 5), null, 2)}
+${colorSection}
+
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "column_mapping": { "original_header": "expected_field_name_or_null" },
+  "color_status_mapping": { "hex_color": "STATUS_VALUE" },
+  "warnings": ["any issues noticed"]
+}
+
+Rules:
+- Map each original header to the closest expected field, or null if irrelevant
+- For color_status_mapping only include colors actually present in the data
+- If a column contains status-like text (Ordered/Done/Complete/Received), map it to "status"
+- Be liberal with matching: "Item Name"→"title", "Club"→"organization", "$ each"→"unit_price", "Qty"→"quantity", "Advisor"→"advisor_email"`,
+    }],
+  });
+
+  const text = response.content.find(b => b.type === "text");
+  if (!text || text.type !== "text") {
+    return { columnMapping: {}, colorStatusMapping: {}, warnings: ["AI parsing unavailable"] };
+  }
+
+  try {
+    const json = JSON.parse(text.text.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
+    return {
+      columnMapping: json.column_mapping ?? {},
+      colorStatusMapping: json.color_status_mapping ?? {},
+      warnings: json.warnings ?? [],
+    };
+  } catch {
+    return { columnMapping: {}, colorStatusMapping: {}, warnings: ["Could not parse AI response"] };
+  }
+}
+
 export async function generateApprovalEmailDraft(params: {
   advisorName: string;
   advisorEmail: string;

@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 type Row = Record<string, string>;
 type ImportResults = { imported: number; skipped: number; errors: string[] };
 type TabId = "requests" | "budgets" | "members";
+type ColorHint = { row: number; color: string };
 
 const TEMPLATES: Record<TabId, { headers: string[]; example: Record<string, string> }> = {
   requests: {
@@ -44,16 +45,17 @@ function downloadTemplate(tab: TabId) {
   XLSX.writeFile(wb, `stamped-${tab}-template.xlsx`);
 }
 
-function parseFile(file: File): Promise<Row[]> {
+function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[] }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const wb = XLSX.read(data, { type: "binary" });
+        const wb = XLSX.read(data, { type: "binary", cellStyles: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Row>(ws, { defval: "" });
-        // Normalize headers to lowercase with underscores
+
+        // Normalize headers
         const normalized = rows.map(row => {
           const n: Row = {};
           for (const k of Object.keys(row)) {
@@ -61,7 +63,25 @@ function parseFile(file: File): Promise<Row[]> {
           }
           return n;
         });
-        resolve(normalized);
+
+        // Extract dominant fill color per row
+        const colorHints: ColorHint[] = [];
+        const ref = ws["!ref"];
+        if (ref) {
+          const range = XLSX.utils.decode_range(ref);
+          for (let r = range.s.r + 1; r <= range.e.r; r++) {
+            for (let c = range.s.c; c <= range.e.c; c++) {
+              const cell = ws[XLSX.utils.encode_cell({ r, c })];
+              const rgb = cell?.s?.fgColor?.rgb ?? cell?.s?.bgColor?.rgb;
+              if (rgb && rgb !== "00000000" && rgb !== "FFFFFFFF" && rgb !== "FF000000") {
+                colorHints.push({ row: r - range.s.r - 1, color: `#${rgb.slice(-6).toUpperCase()}` });
+                break; // one color per row is enough
+              }
+            }
+          }
+        }
+
+        resolve({ rows: normalized, colorHints });
       } catch (err) {
         reject(err);
       }
@@ -80,6 +100,10 @@ export default function ImportPage() {
   const [tab, setTab] = useState<TabId>("requests");
   const [rows, setRows] = useState<Row[]>([]);
   const [fileName, setFileName] = useState("");
+  const [colorHints, setColorHints] = useState<ColorHint[]>([]);
+  const [aiNormalized, setAiNormalized] = useState(false);
+  const [aiWarnings, setAiWarnings] = useState<string[]>([]);
+  const [normalizing, setNormalizing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<ImportResults | null>(null);
@@ -92,12 +116,37 @@ export default function ImportPage() {
   async function loadFile(file: File) {
     setResults(null);
     setError("");
+    setAiNormalized(false);
+    setAiWarnings([]);
     try {
-      const parsed = await parseFile(file);
+      const { rows: parsed, colorHints: hints } = await parseFile(file);
       setRows(parsed);
+      setColorHints(hints);
       setFileName(file.name);
     } catch {
       setError("Could not parse file. Make sure it's a valid CSV or XLSX.");
+    }
+  }
+
+  async function normalizeWithAI() {
+    if (!rows.length) return;
+    setNormalizing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/import/ai-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, colorHints, type: tab }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "AI parse failed"); return; }
+      setRows(data.rows);
+      setAiNormalized(true);
+      setAiWarnings(data.warnings ?? []);
+    } catch {
+      setError("AI normalization failed. You can still import using the raw columns.");
+    } finally {
+      setNormalizing(false);
     }
   }
 
@@ -118,6 +167,9 @@ export default function ImportPage() {
     setTab(t);
     setRows([]);
     setFileName("");
+    setColorHints([]);
+    setAiNormalized(false);
+    setAiWarnings([]);
     setResults(null);
     setError("");
   }
@@ -225,9 +277,32 @@ export default function ImportPage() {
           {/* Preview table */}
           {rows.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">
-                Preview — {rows.length} row{rows.length !== 1 ? "s" : ""}
-              </p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide">
+                  Preview — {rows.length} row{rows.length !== 1 ? "s" : ""}
+                  {aiNormalized && <span className="ml-2 text-green-600 normal-case font-normal">✓ AI normalized</span>}
+                </p>
+                {!aiNormalized && (
+                  <button
+                    onClick={normalizeWithAI}
+                    disabled={normalizing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-stamp text-white text-xs font-semibold rounded hover:opacity-90 disabled:opacity-60"
+                  >
+                    {normalizing ? (
+                      <><svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Normalizing...</>
+                    ) : (
+                      <>✦ Normalize with AI</>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {aiWarnings.length > 0 && (
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 space-y-0.5">
+                  {aiWarnings.map((w, i) => <p key={i}>⚠ {w}</p>)}
+                </div>
+              )}
+
               <div className="overflow-x-auto border border-border rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="bg-paper border-b border-border">
@@ -267,7 +342,7 @@ export default function ImportPage() {
                   {importing ? "Importing..." : `Import ${rows.length} row${rows.length !== 1 ? "s" : ""}`}
                 </button>
                 <button
-                  onClick={() => { setRows([]); setFileName(""); }}
+                  onClick={() => { setRows([]); setFileName(""); setColorHints([]); setAiNormalized(false); setAiWarnings([]); }}
                   className="px-4 py-2 border border-border rounded-md text-sm text-ink-secondary hover:bg-paper"
                 >
                   Clear
