@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
 import { Header } from "@/components/layout/header";
+import Link from "next/link";
 
 type Budget = {
   id: string;
@@ -24,9 +25,52 @@ type Org = {
   budgets: Budget[];
 };
 
+type Request = {
+  id: string;
+  number: string;
+  title: string;
+  status: string;
+  vendorName: string | null;
+  totalEstimated: number | null;
+  totalActual: number | null;
+  orderedAt: string | null;
+  receivedAt: string | null;
+  budgetId: string | null;
+  submittedBy: { name: string | null; email: string };
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  DRAFT: "bg-gray-100 text-gray-600",
+  SUBMITTED: "bg-blue-100 text-blue-700",
+  PENDING_APPROVAL: "bg-yellow-100 text-yellow-700",
+  APPROVED: "bg-emerald-100 text-emerald-700",
+  ORDERED: "bg-purple-100 text-purple-700",
+  PARTIALLY_RECEIVED: "bg-indigo-100 text-indigo-700",
+  RECEIVED: "bg-green-100 text-green-700",
+  READY_FOR_PICKUP: "bg-teal-100 text-teal-700",
+  PICKED_UP: "bg-green-200 text-green-800",
+  CANCELLED: "bg-red-100 text-red-600",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Draft",
+  SUBMITTED: "Submitted",
+  PENDING_APPROVAL: "Pending",
+  APPROVED: "Approved",
+  ORDERED: "Ordered",
+  PARTIALLY_RECEIVED: "Part. Rcvd",
+  RECEIVED: "Received",
+  READY_FOR_PICKUP: "Ready",
+  PICKED_UP: "Picked Up",
+  CANCELLED: "Cancelled",
+};
+
 export default function OrgDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [org, setOrg] = useState<Org | null>(null);
+  const [unlinkedSpent, setUnlinkedSpent] = useState(0);
+  const [unlinkedReserved, setUnlinkedReserved] = useState(0);
+  const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeBudget, setActiveBudget] = useState<string | null>(null);
   const [showAddBudget, setShowAddBudget] = useState(false);
@@ -34,15 +78,22 @@ export default function OrgDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { fetchOrg(); }, [id]);
+  useEffect(() => { fetchAll(); }, [id]);
 
-  async function fetchOrg() {
+  async function fetchAll() {
     setLoading(true);
-    const res = await fetch(`/api/organizations/${id}`);
-    const data = await res.json();
-    setOrg(data.org);
-    if (data.org?.budgets?.length > 0 && !activeBudget) {
-      setActiveBudget(data.org.budgets[0].id);
+    const [orgRes, reqRes] = await Promise.all([
+      fetch(`/api/organizations/${id}`),
+      fetch(`/api/requests?orgId=${id}&limit=500`),
+    ]);
+    const orgData = await orgRes.json();
+    const reqData = await reqRes.json();
+    setOrg(orgData.org);
+    setUnlinkedSpent(orgData.unlinkedSpent ?? 0);
+    setUnlinkedReserved(orgData.unlinkedReserved ?? 0);
+    setRequests((reqData.requests ?? []).filter((r: Request) => r.status !== "CANCELLED"));
+    if (orgData.org?.budgets?.length > 0 && !activeBudget) {
+      setActiveBudget(orgData.org.budgets[0].id);
     }
     setLoading(false);
   }
@@ -63,7 +114,7 @@ export default function OrgDetailPage() {
     if (res.ok) {
       setShowAddBudget(false);
       setBudgetForm({ name: "", fiscalYear: "", allocated: "" });
-      await fetchOrg();
+      await fetchAll();
     } else {
       const d = await res.json();
       setError(d.error || "Failed to create budget");
@@ -89,9 +140,24 @@ export default function OrgDetailPage() {
   const available = selectedBudget
     ? selectedBudget.allocated - selectedBudget.spent - selectedBudget.reserved
     : null;
-  const usedPct = selectedBudget
+  const usedPct = selectedBudget && selectedBudget.allocated > 0
     ? Math.min(100, ((selectedBudget.spent + selectedBudget.reserved) / selectedBudget.allocated) * 100)
     : 0;
+
+  // Line items for the selected budget tab
+  // "Unlinked" pseudo-tab: show requests with no budgetId (only when org has multiple budgets)
+  const isUnlinkedTab = activeBudget === "__unlinked__";
+  const budgetLineItems = isUnlinkedTab
+    ? requests.filter(r => !r.budgetId)
+    : requests.filter(r => r.budgetId === activeBudget);
+
+  // Also show unlinked items under the single budget when org has only one budget
+  const singleBudget = org.budgets.length === 1 ? org.budgets[0] : null;
+  const lineItems = singleBudget && activeBudget === singleBudget.id
+    ? requests.filter(r => r.budgetId === activeBudget || !r.budgetId)
+    : budgetLineItems;
+
+  const totalShown = lineItems.reduce((sum, r) => sum + ((r.totalActual ?? r.totalEstimated) ?? 0), 0);
 
   return (
     <div>
@@ -119,6 +185,19 @@ export default function OrgDetailPage() {
                   <span className="ml-2 text-xs text-ink-muted font-normal">{b.fiscalYear}</span>
                 </button>
               ))}
+              {/* Unlinked tab — only when org has multiple budgets AND there are unlinked requests */}
+              {org.budgets.length > 1 && (unlinkedSpent > 0 || unlinkedReserved > 0) && (
+                <button
+                  onClick={() => setActiveBudget("__unlinked__")}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                    isUnlinkedTab
+                      ? "border-amber-500 text-amber-700"
+                      : "border-transparent text-amber-600 hover:text-amber-800"
+                  }`}
+                >
+                  Unlinked
+                </button>
+              )}
             </div>
             <button
               onClick={() => setShowAddBudget(true)}
@@ -135,43 +214,133 @@ export default function OrgDetailPage() {
                 Add one
               </button>
             </div>
-          ) : selectedBudget ? (
-            <div className="p-6">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <BudgetStat label="Allocated" value={formatCurrency(selectedBudget.allocated)} />
-                <BudgetStat label="Spent" value={formatCurrency(selectedBudget.spent)} />
-                <BudgetStat label="Reserved" value={formatCurrency(selectedBudget.reserved)} />
-                <BudgetStat
-                  label="Available"
-                  value={available != null ? formatCurrency(available) : "—"}
-                  color={
-                    available == null ? undefined
-                    : available < 0 ? "text-red-600"
-                    : available < 500 ? "text-amber-700"
-                    : "text-green-700"
-                  }
-                />
-              </div>
+          ) : (
+            <div className="p-6 space-y-6">
+              {!isUnlinkedTab && selectedBudget && (
+                <>
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <BudgetStat label="Allocated" value={formatCurrency(selectedBudget.allocated)} />
+                    <BudgetStat label="Spent" value={formatCurrency(selectedBudget.spent)} />
+                    <BudgetStat label="Reserved" value={formatCurrency(selectedBudget.reserved)} />
+                    <BudgetStat
+                      label="Available"
+                      value={available != null ? formatCurrency(available) : "—"}
+                      color={
+                        available == null ? undefined
+                        : available < 0 ? "text-red-600"
+                        : available < 500 ? "text-amber-700"
+                        : "text-green-700"
+                      }
+                    />
+                  </div>
 
-              {/* Progress bar */}
-              <div className="mb-2 flex items-center justify-between text-xs text-ink-muted">
-                <span>Budget used</span>
-                <span>{Math.round(usedPct)}%</span>
-              </div>
-              <div className="w-full h-2 bg-border rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    usedPct >= 90 ? "bg-red-500" : usedPct >= 70 ? "bg-amber-500" : "bg-green-500"
-                  }`}
-                  style={{ width: `${usedPct}%` }}
-                />
-              </div>
-
-              {selectedBudget.notes && (
-                <p className="mt-4 text-sm text-ink-secondary">{selectedBudget.notes}</p>
+                  {/* Progress bar */}
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-xs text-ink-muted">
+                      <span>Budget used</span>
+                      <span>{Math.round(usedPct)}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-border rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          usedPct >= 90 ? "bg-red-500" : usedPct >= 70 ? "bg-amber-500" : "bg-green-500"
+                        }`}
+                        style={{ width: `${usedPct}%` }}
+                      />
+                    </div>
+                    {selectedBudget.notes && (
+                      <p className="mt-2 text-sm text-ink-secondary">{selectedBudget.notes}</p>
+                    )}
+                  </div>
+                </>
               )}
+
+              {isUnlinkedTab && (
+                <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+                  These requests have no budget assigned. Link them to a budget from the{" "}
+                  <Link href="/requests" className="underline">All Requests</Link> page.
+                </div>
+              )}
+
+              {/* Line items table */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide">
+                    Line Items
+                    <span className="ml-2 font-normal normal-case">({lineItems.length})</span>
+                  </p>
+                  {totalShown > 0 && (
+                    <p className="text-xs text-ink-muted">
+                      Total: <span className="font-semibold text-ink">{formatCurrency(totalShown)}</span>
+                    </p>
+                  )}
+                </div>
+
+                {lineItems.length === 0 ? (
+                  <p className="text-sm text-ink-muted py-4 text-center">No requests linked to this budget.</p>
+                ) : (
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-paper border-b border-border">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-muted">#</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-muted">Item</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-muted">Vendor</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-muted">Status</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-ink-muted">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {lineItems.map(r => {
+                          const amount = r.totalActual ?? r.totalEstimated;
+                          return (
+                            <tr key={r.id} className="hover:bg-paper/60 transition-colors">
+                              <td className="px-3 py-2 font-mono text-xs text-ink-muted whitespace-nowrap">
+                                <Link href={`/requests/${r.id}`} className="hover:text-navy hover:underline">
+                                  {r.number}
+                                </Link>
+                              </td>
+                              <td className="px-3 py-2 text-ink max-w-[220px]">
+                                <Link href={`/requests/${r.id}`} className="hover:text-navy hover:underline line-clamp-1">
+                                  {r.title}
+                                </Link>
+                                <p className="text-xs text-ink-muted">{r.submittedBy.name ?? r.submittedBy.email}</p>
+                              </td>
+                              <td className="px-3 py-2 text-ink-secondary text-xs max-w-[140px] truncate">
+                                {r.vendorName ?? "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[r.status] ?? "bg-gray-100 text-gray-600"}`}>
+                                  {STATUS_LABELS[r.status] ?? r.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right text-ink whitespace-nowrap">
+                                {amount != null ? (
+                                  <span>
+                                    {formatCurrency(amount)}
+                                    {r.totalActual == null && <span className="text-ink-muted text-xs ml-1">(est)</span>}
+                                  </span>
+                                ) : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      {lineItems.length > 1 && (
+                        <tfoot className="bg-paper border-t-2 border-border">
+                          <tr>
+                            <td colSpan={4} className="px-3 py-2 text-xs font-semibold text-ink-muted text-right">Total</td>
+                            <td className="px-3 py-2 text-right text-sm font-bold text-ink">{formatCurrency(totalShown)}</td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
-          ) : null}
+          )}
         </div>
 
         {/* Add budget modal */}
