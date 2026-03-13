@@ -21,6 +21,18 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ users });
 }
 
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await getServerSession(authOptions);
+  if (!isPlatformAdmin(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const { userId } = await req.json();
+  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
   if (!isPlatformAdmin(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });

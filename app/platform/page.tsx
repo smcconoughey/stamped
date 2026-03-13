@@ -197,6 +197,20 @@ export default function PlatformPage() {
     }
   }
 
+  async function deleteUser(user: User, tenantId: string) {
+    if (!confirm(`Delete ${user.email}? This cannot be undone.`)) return;
+    await fetch(`/api/platform/tenants/${tenantId}/users`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id }),
+    });
+    setTenantUsers(prev => ({
+      ...prev,
+      [tenantId]: (prev[tenantId] || []).filter(u => u.id !== user.id),
+    }));
+    fetchTenants();
+  }
+
   async function toggleUserActive(user: User, tenantId: string) {
     await fetch(`/api/platform/tenants/${tenantId}/users`, {
       method: "PATCH",
@@ -445,6 +459,12 @@ export default function PlatformPage() {
                                         className="text-xs text-ink-muted hover:underline"
                                       >
                                         {u.active ? "Disable" : "Enable"}
+                                      </button>
+                                      <button
+                                        onClick={() => deleteUser(u, t.id)}
+                                        className="text-xs text-red-500 hover:underline"
+                                      >
+                                        Delete
                                       </button>
                                     </div>
                                   </td>
