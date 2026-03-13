@@ -102,7 +102,7 @@ async function main() {
 
   // Create budgets
   await prisma.budget.upsert({
-    where: { organizationId_fiscalYear: { organizationId: roboticsClub.id, fiscalYear: "2024-2025" } },
+    where: { organizationId_fiscalYear_name: { organizationId: roboticsClub.id, fiscalYear: "2024-2025", name: "General" } },
     update: {},
     create: {
       organizationId: roboticsClub.id,
@@ -114,7 +114,7 @@ async function main() {
   });
 
   await prisma.budget.upsert({
-    where: { organizationId_fiscalYear: { organizationId: aeroSociety.id, fiscalYear: "2024-2025" } },
+    where: { organizationId_fiscalYear_name: { organizationId: aeroSociety.id, fiscalYear: "2024-2025", name: "General" } },
     update: {},
     create: {
       organizationId: aeroSociety.id,
@@ -126,7 +126,7 @@ async function main() {
   });
 
   await prisma.budget.upsert({
-    where: { organizationId_fiscalYear: { organizationId: engCouncil.id, fiscalYear: "2024-2025" } },
+    where: { organizationId_fiscalYear_name: { organizationId: engCouncil.id, fiscalYear: "2024-2025", name: "General" } },
     update: {},
     create: {
       organizationId: engCouncil.id,
