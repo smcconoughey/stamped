@@ -10,11 +10,31 @@ import bcrypt from "bcryptjs";
 const PLATFORM_EMAIL = process.env.PLATFORM_ADMIN_EMAIL;
 const PLATFORM_PASSWORD = process.env.PLATFORM_ADMIN_PASSWORD;
 
-// Determine tenant from email domain
+// Determine tenant from email domain, supporting subdomains.
+// e.g. my.erau.edu matches the erau.edu tenant.
 async function findTenantByDomain(email: string) {
   const domain = email.split("@")[1];
   if (!domain) return null;
-  return prisma.tenant.findFirst({ where: { domain } });
+
+  // Exact match first
+  const exact = await prisma.tenant.findFirst({ where: { domain } });
+  if (exact) return exact;
+
+  // Subdomain match: strip one level and try again (my.erau.edu → erau.edu)
+  const parent = domain.split(".").slice(1).join(".");
+  if (parent) return prisma.tenant.findFirst({ where: { domain: parent } });
+
+  return null;
+}
+
+// Derive role from email domain:
+//   @my.X.edu  → STUDENT
+//   @X.edu     → ADMIN_STAFF
+function roleFromDomain(email: string): string {
+  const domain = email.split("@")[1] ?? "";
+  const parts = domain.split(".");
+  // If it has more than 2 parts it's a subdomain (e.g. my.erau.edu) → student
+  return parts.length > 2 ? "STUDENT" : "ADMIN_STAFF";
 }
 
 // Find or provision a user on first SSO login
@@ -37,21 +57,21 @@ async function findOrCreateSsoUser(email: string, name: string | null, azureId: 
     return user;
   }
 
-  // New user — provision with STUDENT role, find tenant by email domain
+  // New user — find tenant and assign role by domain
   const tenant = await findTenantByDomain(email);
   if (!tenant) {
-    // No tenant registered for this email domain yet.
-    // Log so the platform admin can see who tried to sign in.
     console.warn(`[SSO] No tenant for domain ${email.split("@")[1]} — user ${email} blocked. Create the tenant at /platform first.`);
     return null;
   }
+
+  const role = roleFromDomain(email);
 
   return prisma.user.create({
     data: {
       email,
       name,
       azureId,
-      role: "STUDENT",
+      role,
       tenantId: tenant.id,
       active: true,
     },
@@ -142,13 +162,24 @@ export const authOptions: NextAuthOptions = {
       // Azure AD SSO path — provision user on first login
       if (account?.provider === "azure-ad") {
         const email = user.email;
-        if (!email) return false;
+        console.log(`[SSO] signIn attempt: email=${email} azureId=${account.providerAccountId}`);
+        if (!email) {
+          console.warn("[SSO] Blocked: no email returned from Azure AD");
+          return false;
+        }
 
         const azureId = account.providerAccountId;
         const name = user.name ?? (profile as any)?.name ?? null;
 
         const dbUser = await findOrCreateSsoUser(email, name, azureId);
-        if (!dbUser || !dbUser.active) return false;
+        if (!dbUser) {
+          console.warn(`[SSO] Blocked: no tenant found for ${email}`);
+          return false;
+        }
+        if (!dbUser.active) {
+          console.warn(`[SSO] Blocked: user ${email} is inactive`);
+          return false;
+        }
 
         // Attach our DB fields to the user object for jwt callback
         (user as any).id = dbUser.id;
