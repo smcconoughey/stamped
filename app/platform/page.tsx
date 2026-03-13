@@ -271,13 +271,14 @@ export default function PlatformPage() {
 
       {/* Add user modal */}
       {addingUser && (
-        <Modal title="Add User" onClose={() => setAddingUser(null)}>
+        <Modal title="Add / Override User" onClose={() => setAddingUser(null)}>
+          <p className="text-xs text-ink-muted mb-3">Any email address works — school domain not required. Existing accounts are updated in place.</p>
           <form onSubmit={(e) => addUser(addingUser, e)} className="space-y-3">
             <Field label="Email" required>
-              <input className={inputCls} type="email" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="student@erau.edu" required />
+              <input className={inputCls} type="email" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="anyone@gmail.com" required />
             </Field>
-            <Field label="Name">
-              <input className={inputCls} value={userForm.name} onChange={e => setUserForm(f => ({ ...f, name: e.target.value }))} placeholder="Alex Student" />
+            <Field label="Display name">
+              <input className={inputCls} value={userForm.name} onChange={e => setUserForm(f => ({ ...f, name: e.target.value }))} placeholder="Alex Smith" />
             </Field>
             <Field label="Role">
               <select className={inputCls} value={userForm.role} onChange={e => setUserForm(f => ({ ...f, role: e.target.value }))}>
@@ -285,10 +286,10 @@ export default function PlatformPage() {
               </select>
             </Field>
             <Field label="Password">
-              <input className={inputCls} type="password" value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))} placeholder="Leave blank = any password works" />
+              <input className={inputCls} type="password" value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))} placeholder="Leave blank for SSO-only login" />
             </Field>
             <div className="flex gap-2 pt-2">
-              <button type="submit" className="flex-1 py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light">Add User</button>
+              <button type="submit" className="flex-1 py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light">Save User</button>
               <button type="button" onClick={() => setAddingUser(null)} className={cancelCls}>Cancel</button>
             </div>
           </form>

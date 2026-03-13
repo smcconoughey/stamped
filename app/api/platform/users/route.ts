@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (session?.user && (session.user as any).role !== "PLATFORM_ADMIN") {
+  if ((session?.user as any)?.role !== "PLATFORM_ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
       role: role || "STUDENT",
       tenantId,
       active: true,
+      onboarded: true,   // skip onboarding for force-added users
       password: passwordHash,
     },
     update: {
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
       role: role || undefined,
       tenantId,
       active: true,
+      onboarded: true,
       ...(passwordHash ? { password: passwordHash } : {}),
     },
   });
