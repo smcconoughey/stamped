@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 const azureAdEnabled = process.env.NEXT_PUBLIC_AZURE_AD_ENABLED === "true";
@@ -31,7 +31,12 @@ function LoginForm() {
       setError("Invalid email or password.");
       setLoading(false);
     } else {
-      router.push("/");
+      const session = await getSession();
+      if ((session?.user as any)?.role === "PLATFORM_ADMIN") {
+        router.push("/platform");
+      } else {
+        router.push("/");
+      }
     }
   }
 
