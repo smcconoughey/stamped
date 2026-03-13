@@ -10,6 +10,7 @@ interface NavItem {
   href: string;
   adminOnly?: boolean;
   financeOnly?: boolean;
+  orgLeadAllowed?: boolean;
 }
 
 interface NavGroup {
@@ -37,7 +38,7 @@ const navigation: NavGroup[] = [
       { label: "Admin Queue", href: "/admin/queue", adminOnly: true },
       { label: "All Requests", href: "/admin/requests", adminOnly: true },
       { label: "Organizations", href: "/organizations", adminOnly: true },
-      { label: "Import Data", href: "/import", adminOnly: true },
+      { label: "Import Data", href: "/import", adminOnly: true, orgLeadAllowed: true },
     ],
   },
   {
@@ -67,6 +68,7 @@ export function Sidebar() {
 
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(role);
   const isFinance = ["FINANCE_ADMIN", "SUPER_ADMIN"].includes(role);
+  const isOrgLead = role === "ORG_LEAD";
 
   return (
     <aside className="w-56 flex-shrink-0 flex flex-col h-screen bg-white border-r border-border">
@@ -90,7 +92,7 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-2 px-2">
         {navigation.map((group) => {
           const visibleItems = group.items.filter((item) => {
-            if (item.adminOnly && !isAdmin) return false;
+            if (item.adminOnly && !isAdmin && !(item.orgLeadAllowed && isOrgLead)) return false;
             if (item.financeOnly && !isFinance) return false;
             return true;
           });

@@ -1,261 +1,293 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
+import * as XLSX from "xlsx";
 
-interface ImportResults {
-  imported: number;
-  skipped: number;
-  errors: string[];
+type Row = Record<string, string>;
+type ImportResults = { imported: number; skipped: number; errors: string[] };
+type TabId = "requests" | "budgets" | "members";
+
+const TEMPLATES: Record<TabId, { headers: string[]; example: Record<string, string> }> = {
+  requests: {
+    headers: ["organization", "title", "justification", "advisor_email", "vendor", "quantity", "unit_price", "url", "priority", "needed_by"],
+    example: { organization: "Robotics Club", title: "Arduino Mega", justification: "For robot build", advisor_email: "prof@erau.edu", vendor: "DigiKey", quantity: "5", unit_price: "45.00", url: "https://digikey.com", priority: "HIGH", needed_by: "2025-03-01" },
+  },
+  budgets: {
+    headers: ["organization", "budget_name", "fiscal_year", "allocated", "notes"],
+    example: { organization: "Robotics Club", budget_name: "COE Budget", fiscal_year: "FY2025", allocated: "5000.00", notes: "College of Engineering allocation" },
+  },
+  members: {
+    headers: ["email", "name", "role", "organization", "password"],
+    example: { email: "student@my.erau.edu", name: "Alex Student", role: "STUDENT", organization: "Robotics Club", password: "" },
+  },
+};
+
+const TAB_LABELS: Record<TabId, string> = {
+  requests: "Purchase Requests",
+  budgets: "Budgets",
+  members: "Members",
+};
+
+const TAB_DESCRIPTIONS: Record<TabId, string> = {
+  requests: "Import in-flight or historical purchase requests from a spreadsheet.",
+  budgets: "Load budget allocations per organization and fiscal year.",
+  members: "Add or update org members in bulk. Password column is optional (leave blank for SSO-only users).",
+};
+
+function downloadTemplate(tab: TabId) {
+  const { headers, example } = TEMPLATES[tab];
+  const ws = XLSX.utils.aoa_to_sheet([headers, headers.map(h => example[h] ?? "")]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Template");
+  XLSX.writeFile(wb, `stamped-${tab}-template.xlsx`);
 }
 
-interface EmailScrapeResult {
-  foundItems: Array<{
-    description: string;
-    status: string;
-    orderNumber?: string;
-    vendor?: string;
-    estimatedDelivery?: string;
-  }>;
-  summary: string;
-}
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/['"]/g, ""));
-  const rows: Record<string, string>[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
-    if (values.every((v) => !v)) continue;
-    const row: Record<string, string> = {};
-    headers.forEach((header, idx) => {
-      row[header] = values[idx] || "";
-    });
-    rows.push(row);
-  }
-
-  return rows;
+function parseFile(file: File): Promise<Row[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const wb = XLSX.read(data, { type: "binary" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Row>(ws, { defval: "" });
+        // Normalize headers to lowercase with underscores
+        const normalized = rows.map(row => {
+          const n: Row = {};
+          for (const k of Object.keys(row)) {
+            n[k.toLowerCase().trim().replace(/\s+/g, "_")] = String((row as any)[k]);
+          }
+          return n;
+        });
+        resolve(normalized);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsBinaryString(file);
+  });
 }
 
 export default function ImportPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const router = useRouter();
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
+  const isOrgLead = user?.role === "ORG_LEAD";
 
-  const [csvText, setCsvText] = useState("");
+  const [tab, setTab] = useState<TabId>("requests");
+  const [rows, setRows] = useState<Row[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResults, setImportResults] = useState<ImportResults | null>(null);
+  const [results, setResults] = useState<ImportResults | null>(null);
+  const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const [emailText, setEmailText] = useState("");
-  const [scraping, setScraping] = useState(false);
-  const [scrapeResults, setScrapeResults] = useState<EmailScrapeResult | null>(null);
-  const [scrapeError, setScrapeError] = useState<string | null>(null);
+  const canImportBudgets = isAdmin;
+  const canImportMembers = isAdmin || isOrgLead;
 
-  if (!isAdmin) {
-    router.push("/");
-    return null;
+  async function loadFile(file: File) {
+    setResults(null);
+    setError("");
+    try {
+      const parsed = await parseFile(file);
+      setRows(parsed);
+      setFileName(file.name);
+    } catch {
+      setError("Could not parse file. Make sure it's a valid CSV or XLSX.");
+    }
   }
 
-  async function handleCSVImport() {
-    if (!csvText.trim()) return;
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) loadFile(file);
+  }, [tab]);
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) loadFile(file);
+    e.target.value = "";
+  }
+
+  function switchTab(t: TabId) {
+    setTab(t);
+    setRows([]);
+    setFileName("");
+    setResults(null);
+    setError("");
+  }
+
+  async function runImport() {
+    if (!rows.length) return;
     setImporting(true);
-    setImportResults(null);
+    setResults(null);
+    setError("");
+
+    const endpoint =
+      tab === "requests" ? "/api/import" :
+      tab === "budgets"  ? "/api/import/budgets" :
+                           "/api/import/members";
 
     try {
-      const rows = parseCSV(csvText);
-      if (rows.length === 0) {
-        setImportResults({ imported: 0, skipped: 0, errors: ["No valid rows found in CSV"] });
-        return;
-      }
-
-      const res = await fetch("/api/import", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows }),
       });
-
       const data = await res.json();
-      setImportResults(data.results);
-    } catch (err) {
-      setImportResults({
-        imported: 0,
-        skipped: 0,
-        errors: ["Network error: " + (err instanceof Error ? err.message : "Unknown")],
-      });
+      if (!res.ok) { setError(data.error || "Import failed"); return; }
+      setResults(data.results);
+      if (data.results.imported > 0) setRows([]);
+    } catch {
+      setError("Network error. Please try again.");
     } finally {
       setImporting(false);
     }
   }
 
-  async function handleEmailScrape() {
-    if (!emailText.trim()) return;
-    setScraping(true);
-    setScrapeResults(null);
-    setScrapeError(null);
-
-    try {
-      const res = await fetch("/api/email/scrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailContent: emailText }),
-      });
-
-      if (!res.ok) {
-        setScrapeError("Failed to process email. Please try again.");
-        return;
-      }
-
-      const data = await res.json();
-      setScrapeResults(data);
-    } catch {
-      setScrapeError("Network error. Please try again.");
-    } finally {
-      setScraping(false);
-    }
-  }
+  const previewCols = rows.length > 0 ? Object.keys(rows[0]).slice(0, 7) : [];
 
   return (
     <div>
-      <Header
-        title="Import Data"
-        subtitle="Bulk import requests from CSV or extract status from emails"
-      />
+      <Header title="Import Data" subtitle="Bulk import requests, budgets, and members from spreadsheets" />
 
-      <div className="p-6 max-w-3xl space-y-8">
-        {/* CSV Import */}
-        <div className="card p-6 space-y-4">
-          <div>
-            <h2 className="text-base font-semibold text-ink">CSV Bulk Import</h2>
-            <p className="text-sm text-ink-secondary mt-0.5">
-              Paste a CSV with columns: organization, title, justification, advisor_email, vendor, quantity,
-              unit_price, url, priority, needed_by
-            </p>
-          </div>
-
-          <div className="bg-paper rounded-md p-3 text-xs font-mono text-ink-secondary overflow-x-auto">
-            organization,title,justification,advisor_email,quantity,unit_price,url,priority
-            <br />
-            Robotics Club,Arduino Mega,For robot build,prof@uni.edu,5,45.00,https://digikey.com,HIGH
-          </div>
-
-          <Textarea
-            placeholder="Paste your CSV data here..."
-            value={csvText}
-            onChange={(e) => setCsvText(e.target.value)}
-            rows={8}
-            className="font-mono text-xs"
-          />
-
-          {csvText.trim() && (
-            <p className="text-xs text-ink-muted">
-              {parseCSV(csvText).length} row(s) detected
-            </p>
-          )}
-
-          <Button
-            variant="primary"
-            onClick={handleCSVImport}
-            disabled={importing || !csvText.trim()}
-          >
-            {importing ? "Importing..." : "Import CSV"}
-          </Button>
-
-          {importResults && (
-            <div
-              className={`rounded-md border p-4 ${
-                importResults.errors.length > 0
-                  ? "bg-amber-50 border-amber-200"
-                  : "bg-green-50 border-green-200"
-              }`}
-            >
-              <p className="text-sm font-semibold text-ink mb-1">Import Results</p>
-              <p className="text-sm text-ink-secondary">
-                Imported: <strong>{importResults.imported}</strong> &nbsp;|&nbsp; Skipped:{" "}
-                <strong>{importResults.skipped}</strong>
-              </p>
-              {importResults.errors.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {importResults.errors.map((err, i) => (
-                    <p key={i} className="text-xs text-red-700">
-                      {err}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+      <div className="p-6 max-w-5xl space-y-6">
+        {/* Tabs */}
+        <div className="flex border-b border-border">
+          {(["requests", "budgets", "members"] as TabId[]).map(t => {
+            if (t === "budgets" && !canImportBudgets) return null;
+            if (t === "members" && !canImportMembers) return null;
+            return (
+              <button
+                key={t}
+                onClick={() => switchTab(t)}
+                className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  tab === t ? "border-navy text-navy" : "border-transparent text-ink-muted hover:text-ink"
+                }`}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Email Scraper */}
-        <div className="card p-6 space-y-4">
-          <div>
-            <h2 className="text-base font-semibold text-ink">Email Status Extractor</h2>
-            <p className="text-sm text-ink-secondary mt-0.5">
-              Paste an email from a vendor or advisor. The AI will extract order status, tracking info, and
-              delivery details.
-            </p>
+        <div className="card p-6 space-y-5">
+          {/* Description + template */}
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-sm text-ink-secondary">{TAB_DESCRIPTIONS[tab]}</p>
+            <button
+              onClick={() => downloadTemplate(tab)}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 border border-border rounded text-xs font-medium text-ink-secondary hover:bg-paper transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download template
+            </button>
           </div>
 
-          <Textarea
-            placeholder="Paste email content here..."
-            value={emailText}
-            onChange={(e) => setEmailText(e.target.value)}
-            rows={8}
-          />
+          {/* Expected columns hint */}
+          <div className="bg-paper rounded px-3 py-2 text-xs font-mono text-ink-muted overflow-x-auto whitespace-nowrap">
+            {TEMPLATES[tab].headers.join(", ")}
+          </div>
 
-          <Button
-            variant="primary"
-            onClick={handleEmailScrape}
-            disabled={scraping || !emailText.trim()}
+          {/* Drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              dragging ? "border-navy bg-navy/5" : "border-border hover:border-navy/50 hover:bg-paper"
+            }`}
           >
-            {scraping ? "Analyzing Email..." : "Extract Status Info"}
-          </Button>
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={onFileChange} className="hidden" />
+            <svg className="w-8 h-8 text-ink-muted mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            {fileName ? (
+              <p className="text-sm font-medium text-navy">{fileName} — {rows.length} row{rows.length !== 1 ? "s" : ""} parsed</p>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-ink">Drop a file here or click to upload</p>
+                <p className="text-xs text-ink-muted mt-1">CSV or XLSX</p>
+              </>
+            )}
+          </div>
 
-          {scrapeError && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-4">
-              <p className="text-sm text-red-800">{scrapeError}</p>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          {/* Preview table */}
+          {rows.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">
+                Preview — {rows.length} row{rows.length !== 1 ? "s" : ""}
+              </p>
+              <div className="overflow-x-auto border border-border rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="bg-paper border-b border-border">
+                    <tr>
+                      {previewCols.map(c => (
+                        <th key={c} className="px-3 py-2 text-left font-medium text-ink-muted whitespace-nowrap">{c}</th>
+                      ))}
+                      {Object.keys(rows[0]).length > 7 && <th className="px-3 py-2 text-ink-muted">…</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {rows.slice(0, 8).map((row, i) => (
+                      <tr key={i} className="hover:bg-paper/50">
+                        {previewCols.map(c => (
+                          <td key={c} className="px-3 py-2 text-ink max-w-[160px] truncate">{row[c]}</td>
+                        ))}
+                        {Object.keys(row).length > 7 && <td className="px-3 py-2 text-ink-muted">…</td>}
+                      </tr>
+                    ))}
+                    {rows.length > 8 && (
+                      <tr>
+                        <td colSpan={previewCols.length + 1} className="px-3 py-2 text-center text-ink-muted">
+                          + {rows.length - 8} more rows
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={runImport}
+                  disabled={importing}
+                  className="px-5 py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light disabled:opacity-60"
+                >
+                  {importing ? "Importing..." : `Import ${rows.length} row${rows.length !== 1 ? "s" : ""}`}
+                </button>
+                <button
+                  onClick={() => { setRows([]); setFileName(""); }}
+                  className="px-4 py-2 border border-border rounded-md text-sm text-ink-secondary hover:bg-paper"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           )}
 
-          {scrapeResults && (
-            <div className="rounded-md border border-border bg-paper p-4 space-y-3">
-              <div>
-                <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-1">
-                  Summary
-                </p>
-                <p className="text-sm text-ink">{scrapeResults.summary}</p>
-              </div>
-
-              {scrapeResults.foundItems.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">
-                    Found Items ({scrapeResults.foundItems.length})
-                  </p>
-                  <div className="space-y-2">
-                    {scrapeResults.foundItems.map((item, i) => (
-                      <div key={i} className="bg-white border border-border rounded p-3 text-sm">
-                        <p className="font-medium text-ink">{item.description}</p>
-                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-ink-secondary">
-                          <span>
-                            Status: <strong>{item.status}</strong>
-                          </span>
-                          {item.vendor && <span>Vendor: {item.vendor}</span>}
-                          {item.orderNumber && <span>Order #: {item.orderNumber}</span>}
-                          {item.estimatedDelivery && (
-                            <span>Est. Delivery: {item.estimatedDelivery}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+          {/* Results */}
+          {results && (
+            <div className={`rounded-lg border p-4 ${results.errors.length > 0 ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"}`}>
+              <p className="text-sm font-semibold text-ink mb-1">
+                {results.imported > 0 ? `✓ ${results.imported} imported` : "Nothing imported"}
+                {results.skipped > 0 ? `, ${results.skipped} skipped` : ""}
+              </p>
+              {results.errors.length > 0 && (
+                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                  {results.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-red-700">{e}</p>
+                  ))}
                 </div>
               )}
             </div>
