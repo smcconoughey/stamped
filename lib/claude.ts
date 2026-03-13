@@ -201,8 +201,8 @@ Mapping rules (be liberal):
 - "Price Each" / "Unit Price" / "$ each" / "Cost" → "unit_price"
 - "$ amount" / "Invoice" / "Total" / "Amount" → "total_actual"
 - "Running Total" / "Balance" / "Running Balance" → null (ignore, it's a calculated field)
-- "Weblink" / "URL" / "Link" / "Comments" → "url" (if it looks like a URL column)
-- "Notes" / "Comments" / "Description" (secondary) → "notes"
+- "Weblink" / "URL" / "Link" / "Weblink for the item" / "Weblink for the Item/Comments" → ALWAYS map to "url" even if the column has mixed URL and text content
+- "Notes" / "Comments" / "Description" (secondary, when NOT the weblink column) → "notes"
 - "Date Ordered" / "Order Date" / "Ordered" → "date_ordered"
 - "Date Received" / "Received" / "Delivered" → "date_received"
 - "Person to contact" / "Contact" / "Ordered By" → "advisor_name"

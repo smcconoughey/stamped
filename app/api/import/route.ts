@@ -138,9 +138,6 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        currentNum++;
-        const number = generateRequestNumber(prefix, currentNum);
-
         const unitPrice = parseFloat(col(row, "unit_price", "price_each", "price", "cost", "each", "unit_cost")) || null;
         const quantity = parseInt(col(row, "quantity", "qty", "qty_", "count")) || 1;
         // total_actual from the invoice amount column — NOT from running total/balance
@@ -166,13 +163,36 @@ export async function POST(req: NextRequest) {
         const receivedAt = parseDate(dateReceivedRaw);
 
         const vendorName = col(row, "vendor", "vendor_name", "supplier", "store", "source");
-        // URL: weblink column, but skip if value looks like a PO number / invoice note rather than a URL
-        const urlRaw = col(row, "url", "link", "weblink", "weblink_for_the_item_comments");
+
+        // URL extraction: check dedicated URL columns first, then scan all values for a URL
+        // (AI sometimes maps "Weblink for the Item/Comments" → "notes" when cells have mixed content)
+        const urlExplicit = col(row, "url", "link", "weblink", "weblink_for_the_item_comments");
+        const notesRaw = col(row, "notes", "comments", "note");
+        // Find any URL buried in notes or any other column value
+        const urlFromNotes = notesRaw.match(/https?:\/\/\S+/)?.[0] ?? "";
+        const urlFromAnyCol = !urlExplicit && !urlFromNotes
+          ? (Object.values(row).find((v) => typeof v === "string" && (v as string).startsWith("http")) as string | undefined) ?? ""
+          : "";
+        const urlRaw = urlExplicit || urlFromNotes || urlFromAnyCol;
         const vendorUrl = urlRaw.startsWith("http") ? urlRaw : null;
-        // Notes: merge weblink column non-URL content + notes column
-        const notesFromWeblink = urlRaw && !urlRaw.startsWith("http") ? urlRaw : "";
-        const notesFromCol = col(row, "notes", "comments", "note");
+
+        // Notes: keep non-URL content from notes column; strip the URL we already extracted
+        const notesFromWeblink = urlExplicit && !urlExplicit.startsWith("http") ? urlExplicit : "";
+        const notesFromCol = vendorUrl
+          ? notesRaw.replace(vendorUrl, "").trim().replace(/^\||\|$/g, "").trim()
+          : notesRaw;
         const notes = [notesFromWeblink, notesFromCol].filter(Boolean).join(" | ") || null;
+
+        // Skip rows with no financial substance — just a label/category title and nothing else
+        // e.g. "Price Difference/Shipping or handling" with no amount, vendor, date, or URL
+        const hasSubstance = !!(unitPrice || totalActual || orderedAt || receivedAt || vendorName || vendorUrl);
+        if (!hasSubstance) {
+          results.skipped++;
+          continue;
+        }
+
+        currentNum++;
+        const number = generateRequestNumber(prefix, currentNum);
 
         const advisorEmail = col(row, "advisor_email", "contact_email", "e_mail_address", "email_address", "email");
         const advisorName = col(row, "advisor_name", "person_to_contact_for_order", "person_to_contact", "contact_person", "ordered_by", "contact");

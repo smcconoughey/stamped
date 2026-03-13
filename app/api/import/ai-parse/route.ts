@@ -59,10 +59,11 @@ export async function POST(req: NextRequest) {
     // Drop rows that are clearly metadata/empty
     .filter((row: Record<string, string>) => {
       if (type === "requests") {
-        // Keep if has a title, OR has any financial/date data that makes it a real purchase row
         const hasTitle = !!(row.title || row.description);
-        const hasData = !!(row.total_actual || row.unit_price || row.date_ordered || row.date_received || row.vendor);
-        return hasTitle || hasData;
+        const hasData = !!(row.total_actual || row.unit_price || row.date_ordered || row.date_received || row.vendor || row.url);
+        // Need BOTH a title (or description) AND at least one piece of financial/logistical data
+        // Pure label rows like "Shipping/handling" with only a status will be dropped
+        return hasTitle && hasData;
       }
       if (type === "budgets") return !!(row.organization && row.allocated);
       if (type === "members") return !!row.email;
