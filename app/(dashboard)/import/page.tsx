@@ -46,7 +46,7 @@ function downloadTemplate(tab: TabId) {
   XLSX.writeFile(wb, `stamped-${tab}-template.xlsx`);
 }
 
-function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[] }> {
+function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[]; metadata: Record<string, string> }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -54,35 +54,81 @@ function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[] }
         const data = e.target?.result;
         const wb = XLSX.read(data, { type: "binary", cellStyles: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Row>(ws, { defval: "" });
 
-        // Normalize headers
-        const normalized = rows.map(row => {
-          const n: Row = {};
-          for (const k of Object.keys(row)) {
-            n[k.toLowerCase().trim().replace(/\s+/g, "_")] = String((row as any)[k]);
+        // Parse as raw arrays first so we can find the real header row
+        const rawRows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as string[][];
+
+        // Find the header row: first row with 2+ recognisable column keywords
+        const HEADER_KEYWORDS = ["supplier","description","qty","quantity","price","date","email","vendor","item","name","amount","cost","budget","role","organization"];
+        let headerRowIdx = 0;
+        for (let i = 0; i < Math.min(10, rawRows.length); i++) {
+          const text = rawRows[i].map(c => String(c).toLowerCase()).join(" ");
+          if (HEADER_KEYWORDS.filter(k => text.includes(k)).length >= 2) {
+            headerRowIdx = i;
+            break;
           }
-          return n;
-        });
+        }
 
-        // Extract dominant fill color per row
+        // Extract metadata from rows above the header
+        const metadata: Record<string, string> = {};
+        for (let i = 0; i < headerRowIdx; i++) {
+          const cells = rawRows[i].map(c => String(c).trim()).filter(Boolean);
+          const rowText = cells.join(" ");
+
+          // Budget total — first standalone number ≥ 4 digits
+          if (!metadata.budget_total) {
+            const m = rowText.match(/\b(\d{4,}(?:\.\d{1,2})?)\b/);
+            if (m) metadata.budget_total = m[1];
+          }
+          // Cost center
+          const cc = rowText.match(/cost\s*center[:\s]+([A-Z0-9]+)/i);
+          if (cc) metadata.cost_center = cc[1];
+          // Project number
+          const pj = rowText.match(/\bPJ\d+\b/i);
+          if (pj) metadata.project_number = pj[0];
+          // Org name — first non-empty cell of first metadata row
+          if (i === 0 && cells[0] && cells[0].length > 3) metadata.organization = cells[0];
+          // Budget name — second distinct metadata row
+          if (i === 1 && cells[0] && cells[0].length > 3) metadata.budget_name = cells[0];
+          // Org name from row 2 if it looks like an org name (contains project or lab)
+          if (i === 2 && cells[0] && /lab|club|society|council|team|project/i.test(cells[0])) {
+            metadata.organization = cells[0].replace(/\s+PJ\d+/i, "").trim();
+          }
+        }
+
+        // Build normalised column headers from the header row
+        const headers = rawRows[headerRowIdx].map(h =>
+          String(h).toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")
+        );
+
+        // Build data rows (skip empty rows)
+        const normalized: Row[] = [];
+        for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
+          const raw = rawRows[i];
+          if (raw.every(c => !String(c).trim())) continue;
+          const row: Row = {};
+          headers.forEach((h, idx) => { if (h) row[h] = String(raw[idx] ?? ""); });
+          normalized.push(row);
+        }
+
+        // Extract dominant fill color per data row
         const colorHints: ColorHint[] = [];
         const ref = ws["!ref"];
         if (ref) {
           const range = XLSX.utils.decode_range(ref);
-          for (let r = range.s.r + 1; r <= range.e.r; r++) {
+          for (let r = range.s.r + headerRowIdx + 1; r <= range.e.r; r++) {
             for (let c = range.s.c; c <= range.e.c; c++) {
               const cell = ws[XLSX.utils.encode_cell({ r, c })];
               const rgb = cell?.s?.fgColor?.rgb ?? cell?.s?.bgColor?.rgb;
               if (rgb && rgb !== "00000000" && rgb !== "FFFFFFFF" && rgb !== "FF000000") {
-                colorHints.push({ row: r - range.s.r - 1, color: `#${rgb.slice(-6).toUpperCase()}` });
-                break; // one color per row is enough
+                colorHints.push({ row: r - range.s.r - headerRowIdx - 1, color: `#${rgb.slice(-6).toUpperCase()}` });
+                break;
               }
             }
           }
         }
 
-        resolve({ rows: normalized, colorHints });
+        resolve({ rows: normalized, colorHints, metadata });
       } catch (err) {
         reject(err);
       }
@@ -126,10 +172,12 @@ function ImportInner() {
     setError("");
     setAiNormalized(false);
     setAiWarnings([]);
+    setAiMetadata({});
     try {
-      const { rows: parsed, colorHints: hints } = await parseFile(file);
+      const { rows: parsed, colorHints: hints, metadata } = await parseFile(file);
       setRows(parsed);
       setColorHints(hints);
+      setAiMetadata(metadata);
       setFileName(file.name);
     } catch {
       setError("Could not parse file. Make sure it's a valid CSV or XLSX.");
@@ -144,7 +192,7 @@ function ImportInner() {
       const res = await fetch("/api/import/ai-parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, colorHints, type: tab }),
+        body: JSON.stringify({ rows, colorHints, type: tab, knownMetadata: aiMetadata }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "AI parse failed"); return; }

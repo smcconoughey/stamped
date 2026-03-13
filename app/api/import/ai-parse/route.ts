@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { rows, colorHints, type } = await req.json();
+  const { rows, colorHints, type, knownMetadata } = await req.json();
 
   if (!rows?.length || !type) {
     return NextResponse.json({ error: "rows and type required" }, { status: 400 });
@@ -34,9 +34,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Fill org from metadata if not present
-      if (!out.organization && metadata.organization) {
-        out.organization = metadata.organization;
+      // Fill org from metadata if not present (prefer client-extracted knownMetadata)
+      const metaOrg = knownMetadata?.organization || metadata.organization;
+      if (!out.organization && metaOrg) {
+        out.organization = metaOrg;
       }
 
       // Apply color-based status if no explicit status
@@ -57,5 +58,8 @@ export async function POST(req: NextRequest) {
       return true;
     });
 
-  return NextResponse.json({ rows: normalized, columnMapping, colorStatusMapping, statusInference, metadata, warnings });
+  // Merge client-extracted metadata with AI-detected metadata (client wins on conflicts)
+  const mergedMetadata = { ...metadata, ...knownMetadata };
+
+  return NextResponse.json({ rows: normalized, columnMapping, colorStatusMapping, statusInference, metadata: mergedMetadata, warnings });
 }
