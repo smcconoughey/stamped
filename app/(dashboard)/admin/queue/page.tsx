@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { AISummaryBox } from "@/components/dashboard/ai-summary-box";
 import { RowStampButton } from "@/components/requests/row-stamp-button";
 import {
-  formatCurrency, formatDate, STATUS_LABELS, PRIORITY_COLORS, PRIORITY_LABELS, RequestStatus,
+  formatCurrency, PRIORITY_COLORS, PRIORITY_LABELS,
 } from "@/lib/utils";
 
 const PRIMARY_NEXT: Record<string, string> = {
@@ -21,16 +21,18 @@ const PRIMARY_NEXT: Record<string, string> = {
   READY_FOR_PICKUP: "PICKED_UP",
 };
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  SUBMITTED:          { label: "Submitted",       cls: "bg-blue-50 text-blue-700 border border-blue-200" },
-  PENDING_APPROVAL:   { label: "Pending Approval",cls: "bg-yellow-50 text-yellow-700 border border-yellow-200" },
-  APPROVED:           { label: "Approved",        cls: "bg-emerald-50 text-emerald-700 border border-emerald-200" },
-  ORDERED:            { label: "Ordered",         cls: "bg-indigo-50 text-indigo-700 border border-indigo-200" },
-  PARTIALLY_RECEIVED: { label: "Partial",         cls: "bg-orange-50 text-orange-700 border border-orange-200" },
-  RECEIVED:           { label: "Received",        cls: "bg-teal-50 text-teal-700 border border-teal-200" },
-  READY_FOR_PICKUP:   { label: "Ready for Pickup",cls: "bg-purple-50 text-purple-700 border border-purple-200" },
-  PICKED_UP:          { label: "Picked Up",       cls: "bg-gray-50 text-gray-600 border border-gray-200" },
+const STATUS_META: Record<string, { label: string; cls: string; order: number }> = {
+  SUBMITTED:          { label: "Submitted",        cls: "bg-blue-50 text-blue-700 border border-blue-200",     order: 1 },
+  PENDING_APPROVAL:   { label: "Pending Approval", cls: "bg-yellow-50 text-yellow-700 border border-yellow-200", order: 2 },
+  APPROVED:           { label: "Approved",         cls: "bg-emerald-50 text-emerald-700 border border-emerald-200", order: 3 },
+  ORDERED:            { label: "Ordered",          cls: "bg-indigo-50 text-indigo-700 border border-indigo-200",  order: 4 },
+  PARTIALLY_RECEIVED: { label: "Partial",          cls: "bg-orange-50 text-orange-700 border border-orange-200",  order: 5 },
+  RECEIVED:           { label: "Received",         cls: "bg-teal-50 text-teal-700 border border-teal-200",        order: 6 },
+  READY_FOR_PICKUP:   { label: "Ready for Pickup", cls: "bg-purple-50 text-purple-700 border border-purple-200",  order: 7 },
+  PICKED_UP:          { label: "Picked Up",        cls: "bg-gray-50 text-gray-600 border border-gray-200",        order: 8 },
 };
+
+const PRIORITY_ORDER: Record<string, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
 
 const FILTER_TABS = [
   { label: "All Active", value: "" },
@@ -40,6 +42,17 @@ const FILTER_TABS = [
   { label: "Approved",   value: "APPROVED" },
   { label: "Ordered",    value: "ORDERED" },
   { label: "Ready",      value: "READY_FOR_PICKUP" },
+];
+
+type SortCol = "date" | "number" | "amount" | "status" | "priority";
+type SortDir = "asc" | "desc";
+
+const SORT_OPTIONS: { label: string; col: SortCol }[] = [
+  { label: "Date",     col: "date" },
+  { label: "Number",   col: "number" },
+  { label: "Amount",   col: "amount" },
+  { label: "Status",   col: "status" },
+  { label: "Priority", col: "priority" },
 ];
 
 const EMAIL_ACTION_STATUSES = ["SUBMITTED", "PENDING_APPROVAL"];
@@ -77,6 +90,8 @@ export default function AdminQueuePage() {
   const [pollResult, setPollResult] = useState<string | null>(null);
   const [stampedIds, setStampedIds] = useState<Set<string>>(new Set());
   const [celebration, setCelebration] = useState(false);
+  const [sortCol, setSortCol] = useState<SortCol>("date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   useEffect(() => { if (!isAdmin && user) router.push("/"); }, [isAdmin, user]);
   useEffect(() => { fetchRequests(); }, [activeFilter]);
@@ -99,12 +114,45 @@ export default function AdminQueuePage() {
     finally { setLoading(false); }
   }, [activeFilter]);
 
+  function toggleSort(col: SortCol) {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir(col === "date" ? "desc" : "asc"); }
+  }
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...requests].sort((a, b) => {
+      switch (sortCol) {
+        case "number": return dir * a.number.localeCompare(b.number);
+        case "amount": {
+          const av = a.totalActual ?? a.totalEstimated ?? 0;
+          const bv = b.totalActual ?? b.totalEstimated ?? 0;
+          return dir * (av - bv);
+        }
+        case "status": {
+          const ao = STATUS_META[a.status]?.order ?? 99;
+          const bo = STATUS_META[b.status]?.order ?? 99;
+          return dir * (ao - bo);
+        }
+        case "priority": {
+          const ap = PRIORITY_ORDER[a.priority] ?? 99;
+          const bp = PRIORITY_ORDER[b.priority] ?? 99;
+          return dir * (ap - bp);
+        }
+        default: { // date
+          const ad = new Date(a.submittedAt ?? a.createdAt).getTime();
+          const bd = new Date(b.submittedAt ?? b.createdAt).getTime();
+          return dir * (ad - bd);
+        }
+      }
+    });
+  }, [requests, sortCol, sortDir]);
+
   async function stamp(requestId: string, newStatus: string) {
     await fetch(`/api/requests/${requestId}/status`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus }),
     });
-    // Flash the row as stamped
     setStampedIds(prev => { const n = new Set(prev); n.add(requestId); return n; });
     if (newStatus === "PICKED_UP") {
       setCelebration(true);
@@ -144,10 +192,6 @@ export default function AdminQueuePage() {
   }
 
   if (!isAdmin) return null;
-
-  // Group by status for counts
-  const byStatus: Record<string, number> = {};
-  for (const r of requests) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
 
   return (
     <div>
@@ -194,7 +238,27 @@ export default function AdminQueuePage() {
           })}
         </div>
 
-        {/* Request cards */}
+        {/* Sort controls */}
+        {!loading && requests.length > 1 && (
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-ink-muted mr-1">Sort:</span>
+            {SORT_OPTIONS.map(opt => (
+              <button key={opt.col} onClick={() => toggleSort(opt.col)}
+                className={`px-2.5 py-1 text-xs rounded border transition-colors flex items-center gap-1 ${
+                  sortCol === opt.col
+                    ? "bg-navy text-white border-navy"
+                    : "bg-white text-ink-secondary border-border hover:border-navy hover:text-navy"
+                }`}>
+                {opt.label}
+                {sortCol === opt.col && (
+                  <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Request rows */}
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -211,7 +275,7 @@ export default function AdminQueuePage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {requests.map(req => {
+            {sorted.map(req => {
               const primaryNext = PRIMARY_NEXT[req.status];
               const meta = STATUS_META[req.status];
               const isStamped = stampedIds.has(req.id);
@@ -219,7 +283,7 @@ export default function AdminQueuePage() {
                 <div key={req.id}
                   className={`card p-0 overflow-hidden transition-all duration-300 ${isStamped ? "stamp-flash" : "hover:shadow-md"}`}>
                   <div className="flex items-stretch">
-                    {/* Color accent bar by status */}
+                    {/* Status accent bar */}
                     <div className={`w-1 shrink-0 ${
                       req.status === "SUBMITTED" ? "bg-blue-400" :
                       req.status === "PENDING_APPROVAL" ? "bg-yellow-400" :
@@ -229,14 +293,15 @@ export default function AdminQueuePage() {
                       req.status === "READY_FOR_PICKUP" ? "bg-purple-500" : "bg-border"
                     }`} />
 
+                    {/* Main content — fixed column widths so rows stay aligned */}
                     <div className="flex-1 flex items-center gap-4 px-4 py-3 min-w-0">
-                      {/* Number */}
+                      {/* Request number — fixed w-24 */}
                       <Link href={`/requests/${req.id}`} onClick={e => e.stopPropagation()}
-                        className="font-mono text-xs text-navy hover:underline shrink-0 w-24">
+                        className="font-mono text-xs text-navy hover:underline shrink-0 w-24 truncate">
                         {req.number}
                       </Link>
 
-                      {/* Title + org */}
+                      {/* Title + org — flex-1 */}
                       <div className="flex-1 min-w-0">
                         <Link href={`/requests/${req.id}`}
                           className="font-medium text-ink hover:text-navy truncate block text-sm">
@@ -249,43 +314,53 @@ export default function AdminQueuePage() {
                         </p>
                       </div>
 
-                      {/* Amount */}
-                      <span className="text-sm font-medium text-ink-secondary shrink-0 hidden sm:block">
+                      {/* Amount — fixed w-20, right-aligned */}
+                      <span className="text-sm font-medium text-ink-secondary shrink-0 w-20 text-right hidden sm:block">
                         {req.totalActual ? formatCurrency(req.totalActual) : req.totalEstimated ? formatCurrency(req.totalEstimated) : "—"}
                       </span>
 
-                      {/* Current status badge */}
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 hidden md:inline-flex ${meta?.cls ?? "bg-paper text-ink-muted"}`}>
+                      {/* Status badge — fixed w-32 */}
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 w-32 text-center hidden md:inline-flex items-center justify-center ${meta?.cls ?? "bg-paper text-ink-muted"}`}>
                         {meta?.label ?? req.status}
                       </span>
 
-                      {/* Priority */}
-                      {req.priority && req.priority !== "NORMAL" && (
-                        <span className={`text-xs font-medium shrink-0 hidden lg:block ${PRIORITY_COLORS[req.priority as keyof typeof PRIORITY_COLORS] ?? ""}`}>
-                          {PRIORITY_LABELS[req.priority as keyof typeof PRIORITY_LABELS] ?? req.priority}
-                        </span>
-                      )}
+                      {/* Priority — fixed w-14, only non-NORMAL */}
+                      <span className={`text-xs font-medium shrink-0 w-14 hidden lg:block ${
+                        req.priority && req.priority !== "NORMAL"
+                          ? PRIORITY_COLORS[req.priority as keyof typeof PRIORITY_COLORS] ?? ""
+                          : "text-transparent"
+                      }`}>
+                        {req.priority && req.priority !== "NORMAL"
+                          ? PRIORITY_LABELS[req.priority as keyof typeof PRIORITY_LABELS] ?? req.priority
+                          : "·"}
+                      </span>
                     </div>
 
-                    {/* Action zone */}
-                    <div className="flex items-center gap-2 px-4 py-3 shrink-0 border-l border-border bg-paper/30">
-                      {EMAIL_ACTION_STATUSES.includes(req.status) && (
-                        <button onClick={() => sendApprovalEmail(req.id)} disabled={emailingId === req.id}
-                          className="text-xs text-ink-secondary hover:text-navy border border-border rounded px-2 py-1 hover:bg-white transition-colors disabled:opacity-50">
-                          {emailingId === req.id ? "…" : "Email"}
-                        </button>
-                      )}
+                    {/* Action zone — fixed w-56 so every row is identical width */}
+                    <div className="flex items-center justify-end gap-2 px-4 py-3 border-l border-border bg-paper/30 w-56 shrink-0">
+                      {/* Email button — fixed w-14 space, visible only for relevant statuses */}
+                      <div className="w-14 flex justify-center">
+                        {EMAIL_ACTION_STATUSES.includes(req.status) ? (
+                          <button onClick={() => sendApprovalEmail(req.id)} disabled={emailingId === req.id}
+                            className="text-xs text-ink-secondary hover:text-navy border border-border rounded px-2 py-1 hover:bg-white transition-colors disabled:opacity-50 w-full text-center">
+                            {emailingId === req.id ? "…" : "Email"}
+                          </button>
+                        ) : null}
+                      </div>
 
-                      {/* THE STAMP */}
-                      {primaryNext && (
-                        <RowStampButton
-                          targetStatus={primaryNext}
-                          onStamp={s => stamp(req.id, s)}
-                          disabled={isStamped}
-                        />
-                      )}
+                      {/* Stamp button — fixed w-32 space always reserved */}
+                      <div className="w-32 flex justify-center">
+                        {primaryNext ? (
+                          <RowStampButton
+                            targetStatus={primaryNext}
+                            onStamp={s => stamp(req.id, s)}
+                            disabled={isStamped}
+                          />
+                        ) : null}
+                      </div>
 
-                      <Link href={`/requests/${req.id}`}>
+                      {/* Open icon — fixed size */}
+                      <Link href={`/requests/${req.id}`} className="shrink-0">
                         <button className="text-xs text-ink-muted hover:text-navy p-1.5 rounded hover:bg-white transition-colors" title="Open">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />

@@ -69,16 +69,15 @@ export function RowStampButton({ targetStatus, onStamp, disabled, size = "md" }:
         onClick={handleClick}
         disabled={disabled || pressing}
         title={cfg.verb}
-        className={`relative font-bold uppercase tracking-wide border-2 rounded select-none transition-shadow whitespace-nowrap
+        className={`relative font-semibold uppercase tracking-wide border-2 rounded select-none transition-shadow text-center
           ${cfg.color} ${cfg.bg} ${cfg.border}
-          ${isSm ? "text-[10px] px-2 py-0.5" : "text-xs px-3 py-1"}
+          ${isSm ? "text-[10px] px-2 py-0.5 w-24" : "text-xs px-3 py-1 w-32"}
           ${pressing ? "" : "hover:shadow-md"}
           disabled:opacity-40 disabled:cursor-not-allowed`}
         style={{
           animation: pressing ? "rsbPress 0.38s cubic-bezier(0.34,1.56,0.64,1)" : undefined,
           boxShadow: pressing ? `0 0 12px ${cfg.glow}` : undefined,
-          letterSpacing: "0.08em",
-          fontFamily: "Georgia, serif",
+          letterSpacing: "0.06em",
         }}
       >
         {pressing ? "…" : cfg.verb}
