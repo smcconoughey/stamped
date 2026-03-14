@@ -12,6 +12,7 @@ interface NavItem {
   financeOnly?: boolean;
   orgLeadAllowed?: boolean;
   orgLeadOnly?: boolean;
+  nonAdminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -24,13 +25,8 @@ const navigation: NavGroup[] = [
     section: "Overview",
     items: [
       { label: "Dashboard", href: "/" },
-      { label: "My Requests", href: "/requests" },
-    ],
-  },
-  {
-    section: "Submit",
-    items: [
-      { label: "New Request", href: "/requests/new" },
+      { label: "My Requests", href: "/requests", nonAdminOnly: true },
+      { label: "New Request", href: "/requests/new", nonAdminOnly: true },
     ],
   },
   {
@@ -44,7 +40,7 @@ const navigation: NavGroup[] = [
     section: "Admin",
     items: [
       { label: "Admin Queue", href: "/admin/queue", adminOnly: true },
-      { label: "All Requests", href: "/admin/requests", adminOnly: true },
+      { label: "All Requests", href: "/requests", adminOnly: true },
       { label: "Organizations", href: "/organizations", adminOnly: true },
       { label: "Import Data", href: "/import", adminOnly: true },
     ],
@@ -101,6 +97,7 @@ export function Sidebar() {
         {navigation.map((group) => {
           const visibleItems = group.items.filter((item) => {
             if (item.adminOnly && !isAdmin) return false;
+            if (item.nonAdminOnly && isAdmin) return false;
             if (item.financeOnly && !isFinance) return false;
             if (item.orgLeadOnly && !isOrgLead) return false;
             if (item.orgLeadAllowed && !isAdmin && !isFinance && !isOrgLead) return false;

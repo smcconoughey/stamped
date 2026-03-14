@@ -8,9 +8,7 @@ import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { AISummaryBox } from "@/components/dashboard/ai-summary-box";
 import { RowStampButton } from "@/components/requests/row-stamp-button";
-import {
-  formatCurrency, PRIORITY_COLORS, PRIORITY_LABELS,
-} from "@/lib/utils";
+import { formatCurrency, PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/utils";
 
 const PRIMARY_NEXT: Record<string, string> = {
   SUBMITTED: "APPROVED",
@@ -22,7 +20,7 @@ const PRIMARY_NEXT: Record<string, string> = {
 };
 
 const STATUS_META: Record<string, { label: string; cls: string; order: number }> = {
-  SUBMITTED:          { label: "Submitted",        cls: "bg-blue-50 text-blue-700 border border-blue-200",     order: 1 },
+  SUBMITTED:          { label: "Submitted",        cls: "bg-blue-50 text-blue-700 border border-blue-200",       order: 1 },
   PENDING_APPROVAL:   { label: "Pending Approval", cls: "bg-yellow-50 text-yellow-700 border border-yellow-200", order: 2 },
   APPROVED:           { label: "Approved",         cls: "bg-emerald-50 text-emerald-700 border border-emerald-200", order: 3 },
   ORDERED:            { label: "Ordered",          cls: "bg-indigo-50 text-indigo-700 border border-indigo-200",  order: 4 },
@@ -34,14 +32,16 @@ const STATUS_META: Record<string, { label: string; cls: string; order: number }>
 
 const PRIORITY_ORDER: Record<string, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
 
+const ACTIVE_STATUSES = ["SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP"];
+
 const FILTER_TABS = [
-  { label: "All Active", value: "" },
-  { label: "My Queue",   value: "mine" },
-  { label: "Submitted",  value: "SUBMITTED" },
-  { label: "Pending Approval", value: "PENDING_APPROVAL" },
-  { label: "Approved",   value: "APPROVED" },
-  { label: "Ordered",    value: "ORDERED" },
-  { label: "Ready",      value: "READY_FOR_PICKUP" },
+  { label: "All Active",        value: "" },
+  { label: "My Queue",          value: "mine" },
+  { label: "Submitted",         value: "SUBMITTED" },
+  { label: "Pending Approval",  value: "PENDING_APPROVAL" },
+  { label: "Approved",          value: "APPROVED" },
+  { label: "Ordered",           value: "ORDERED" },
+  { label: "Ready",             value: "READY_FOR_PICKUP" },
 ];
 
 type SortCol = "date" | "number" | "amount" | "status" | "priority";
@@ -57,7 +57,6 @@ const SORT_OPTIONS: { label: string; col: SortCol }[] = [
 
 const EMAIL_ACTION_STATUSES = ["SUBMITTED", "PENDING_APPROVAL"];
 
-// Confetti for PICKED_UP
 const CONFETTI_COLORS = ["#10b981","#6366f1","#f59e0b","#ef4444","#3b82f6","#a855f7","#ec4899"];
 function Confetti() {
   const p = Array.from({ length: 60 }, (_, i) => ({
@@ -82,6 +81,7 @@ export default function AdminQueuePage() {
   const user = session?.user as any;
   const isAdmin = ["ADMIN_STAFF","FINANCE_ADMIN","SUPER_ADMIN"].includes(user?.role);
 
+  // Always fetch ALL active requests — filtering is purely client-side so tab counts are always accurate
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState("");
@@ -94,34 +94,34 @@ export default function AdminQueuePage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   useEffect(() => { if (!isAdmin && user) router.push("/"); }, [isAdmin, user]);
-  useEffect(() => { fetchRequests(); }, [activeFilter]);
+  useEffect(() => { fetchRequests(); }, []);
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (activeFilter === "mine") params.set("assignedToMe", "true");
-      else if (activeFilter) params.set("status", activeFilter);
-      const res = await fetch(`/api/requests?${params}`);
+      const res = await fetch("/api/requests");
       const data = await res.json();
-      let reqs = data.requests || [];
-      if (!activeFilter || activeFilter === "mine") {
-        const active = ["SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP"];
-        reqs = reqs.filter((r: any) => active.includes(r.status));
-      }
+      const reqs = (data.requests || []).filter((r: any) => ACTIVE_STATUSES.includes(r.status));
       setRequests(reqs);
     } catch { setRequests([]); }
     finally { setLoading(false); }
-  }, [activeFilter]);
+  }, []);
 
   function toggleSort(col: SortCol) {
     if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortCol(col); setSortDir(col === "date" ? "desc" : "asc"); }
   }
 
+  // Client-side filter (counts are always from full `requests` array)
+  const filtered = useMemo(() => {
+    if (activeFilter === "mine") return requests.filter(r => r.assignedToId === user?.id);
+    if (activeFilter) return requests.filter(r => r.status === activeFilter);
+    return requests;
+  }, [requests, activeFilter, user?.id]);
+
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
-    return [...requests].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       switch (sortCol) {
         case "number": return dir * a.number.localeCompare(b.number);
         case "amount": {
@@ -139,14 +139,14 @@ export default function AdminQueuePage() {
           const bp = PRIORITY_ORDER[b.priority] ?? 99;
           return dir * (ap - bp);
         }
-        default: { // date
+        default: {
           const ad = new Date(a.submittedAt ?? a.createdAt).getTime();
           const bd = new Date(b.submittedAt ?? b.createdAt).getTime();
           return dir * (ad - bd);
         }
       }
     });
-  }, [requests, sortCol, sortDir]);
+  }, [filtered, sortCol, sortDir]);
 
   async function stamp(requestId: string, newStatus: string) {
     await fetch(`/api/requests/${requestId}/status`, {
@@ -220,19 +220,20 @@ export default function AdminQueuePage() {
       <div className="p-6 space-y-5">
         <AISummaryBox />
 
-        {/* Filter tabs with counts */}
+        {/* Filter tabs — counts always computed from full requests list */}
         <div className="flex flex-wrap gap-0 border-b border-border">
           {FILTER_TABS.map(tab => {
-            const count = tab.value && tab.value !== "mine"
-              ? requests.filter(r => r.status === tab.value).length
-              : tab.value === "" ? requests.length : null;
+            let count: number | null = null;
+            if (tab.value === "") count = requests.length;
+            else if (tab.value === "mine") count = requests.filter(r => r.assignedToId === user?.id).length;
+            else count = requests.filter(r => r.status === tab.value).length;
             return (
               <button key={tab.value} onClick={() => setActiveFilter(tab.value)}
                 className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                   activeFilter === tab.value ? "border-navy text-navy" : "border-transparent text-ink-secondary hover:text-ink"
                 }`}>
                 {tab.label}
-                {count != null && <span className="ml-1.5 text-xs opacity-60">{count}</span>}
+                <span className="ml-1.5 text-xs opacity-60">{count}</span>
               </button>
             );
           })}
@@ -250,9 +251,7 @@ export default function AdminQueuePage() {
                     : "bg-white text-ink-secondary border-border hover:border-navy hover:text-navy"
                 }`}>
                 {opt.label}
-                {sortCol === opt.col && (
-                  <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>
-                )}
+                {sortCol === opt.col && <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>}
               </button>
             ))}
           </div>
@@ -267,11 +266,13 @@ export default function AdminQueuePage() {
               </div>
             ))}
           </div>
-        ) : requests.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <div className="card p-12 text-center">
-            <p className="text-2xl mb-2">🎉</p>
-            <p className="text-ink font-medium">Queue is clear!</p>
-            <p className="text-sm text-ink-muted mt-1">No active requests need action right now.</p>
+            <p className="text-2xl mb-2">{requests.length === 0 ? "🎉" : "🔍"}</p>
+            <p className="text-ink font-medium">{requests.length === 0 ? "Queue is clear!" : "No requests match this filter"}</p>
+            <p className="text-sm text-ink-muted mt-1">
+              {requests.length === 0 ? "No active requests need action right now." : `${requests.length} total active request${requests.length !== 1 ? "s" : ""} in other stages`}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -293,15 +294,13 @@ export default function AdminQueuePage() {
                       req.status === "READY_FOR_PICKUP" ? "bg-purple-500" : "bg-border"
                     }`} />
 
-                    {/* Main content — fixed column widths so rows stay aligned */}
+                    {/* Main content */}
                     <div className="flex-1 flex items-center gap-4 px-4 py-3 min-w-0">
-                      {/* Request number — fixed w-24 */}
                       <Link href={`/requests/${req.id}`} onClick={e => e.stopPropagation()}
                         className="font-mono text-xs text-navy hover:underline shrink-0 w-24 truncate">
                         {req.number}
                       </Link>
 
-                      {/* Title + org — flex-1 */}
                       <div className="flex-1 min-w-0">
                         <Link href={`/requests/${req.id}`}
                           className="font-medium text-ink hover:text-navy truncate block text-sm">
@@ -314,21 +313,18 @@ export default function AdminQueuePage() {
                         </p>
                       </div>
 
-                      {/* Amount — fixed w-20, right-aligned */}
                       <span className="text-sm font-medium text-ink-secondary shrink-0 w-20 text-right hidden sm:block">
                         {req.totalActual ? formatCurrency(req.totalActual) : req.totalEstimated ? formatCurrency(req.totalEstimated) : "—"}
                       </span>
 
-                      {/* Status badge — fixed w-32 */}
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 w-32 text-center hidden md:inline-flex items-center justify-center ${meta?.cls ?? "bg-paper text-ink-muted"}`}>
                         {meta?.label ?? req.status}
                       </span>
 
-                      {/* Priority — fixed w-14, only non-NORMAL */}
                       <span className={`text-xs font-medium shrink-0 w-14 hidden lg:block ${
                         req.priority && req.priority !== "NORMAL"
                           ? PRIORITY_COLORS[req.priority as keyof typeof PRIORITY_COLORS] ?? ""
-                          : "text-transparent"
+                          : "text-transparent select-none"
                       }`}>
                         {req.priority && req.priority !== "NORMAL"
                           ? PRIORITY_LABELS[req.priority as keyof typeof PRIORITY_LABELS] ?? req.priority
@@ -336,9 +332,8 @@ export default function AdminQueuePage() {
                       </span>
                     </div>
 
-                    {/* Action zone — fixed w-56 so every row is identical width */}
+                    {/* Action zone — fixed width so every row aligns */}
                     <div className="flex items-center justify-end gap-2 px-4 py-3 border-l border-border bg-paper/30 w-56 shrink-0">
-                      {/* Email button — fixed w-14 space, visible only for relevant statuses */}
                       <div className="w-14 flex justify-center">
                         {EMAIL_ACTION_STATUSES.includes(req.status) ? (
                           <button onClick={() => sendApprovalEmail(req.id)} disabled={emailingId === req.id}
@@ -348,7 +343,6 @@ export default function AdminQueuePage() {
                         ) : null}
                       </div>
 
-                      {/* Stamp button — fixed w-32 space always reserved */}
                       <div className="w-32 flex justify-center">
                         {primaryNext ? (
                           <RowStampButton
@@ -359,7 +353,6 @@ export default function AdminQueuePage() {
                         ) : null}
                       </div>
 
-                      {/* Open icon — fixed size */}
                       <Link href={`/requests/${req.id}`} className="shrink-0">
                         <button className="text-xs text-ink-muted hover:text-navy p-1.5 rounded hover:bg-white transition-colors" title="Open">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
