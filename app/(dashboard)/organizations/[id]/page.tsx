@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { formatCurrency } from "@/lib/utils";
 import { Header } from "@/components/layout/header";
 import Link from "next/link";
@@ -67,6 +68,11 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function OrgDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { data: session } = useSession();
+  const user = session?.user as any;
+  const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
+  const canManageBudgets = isAdmin || user?.role === "ORG_LEAD";
+
   const [org, setOrg] = useState<Org | null>(null);
   const [unlinkedSpent, setUnlinkedSpent] = useState(0);
   const [unlinkedReserved, setUnlinkedReserved] = useState(0);
@@ -74,9 +80,17 @@ export default function OrgDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeBudget, setActiveBudget] = useState<string | null>(null);
   const [showAddBudget, setShowAddBudget] = useState(false);
-  const [budgetForm, setBudgetForm] = useState({ name: "", fiscalYear: "", allocated: "" });
+  const [budgetForm, setBudgetForm] = useState({ name: "", fiscalYear: "", allocated: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Edit budget modal
+  const [editBudget, setEditBudget] = useState<Budget | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", fiscalYear: "", allocated: "", notes: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { fetchAll(); }, [id]);
 
@@ -109,17 +123,71 @@ export default function OrgDetailPage() {
         name: budgetForm.name,
         fiscalYear: budgetForm.fiscalYear,
         allocated: parseFloat(budgetForm.allocated),
+        notes: budgetForm.notes || null,
       }),
     });
     if (res.ok) {
       setShowAddBudget(false);
-      setBudgetForm({ name: "", fiscalYear: "", allocated: "" });
+      setBudgetForm({ name: "", fiscalYear: "", allocated: "", notes: "" });
       await fetchAll();
     } else {
       const d = await res.json();
       setError(d.error || "Failed to create budget");
     }
     setSaving(false);
+  }
+
+  function openEdit(b: Budget) {
+    setEditBudget(b);
+    setEditForm({ name: b.name, fiscalYear: b.fiscalYear, allocated: String(b.allocated), notes: b.notes ?? "" });
+    setEditError("");
+    setConfirmDelete(false);
+  }
+
+  async function saveBudget(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editBudget) return;
+    setEditSaving(true);
+    setEditError("");
+    const res = await fetch(`/api/organizations/${id}/budgets`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        budgetId: editBudget.id,
+        name: editForm.name,
+        fiscalYear: editForm.fiscalYear,
+        allocated: parseFloat(editForm.allocated),
+        notes: editForm.notes || null,
+      }),
+    });
+    if (res.ok) {
+      setEditBudget(null);
+      await fetchAll();
+    } else {
+      const d = await res.json();
+      setEditError(d.error || "Failed to save");
+    }
+    setEditSaving(false);
+  }
+
+  async function deleteBudget() {
+    if (!editBudget) return;
+    setDeleting(true);
+    const res = await fetch(`/api/organizations/${id}/budgets`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ budgetId: editBudget.id }),
+    });
+    if (res.ok) {
+      setEditBudget(null);
+      setActiveBudget(null);
+      await fetchAll();
+    } else {
+      const d = await res.json();
+      setEditError(d.error || "Failed to delete");
+    }
+    setDeleting(false);
+    setConfirmDelete(false);
   }
 
   if (loading) return (
@@ -172,18 +240,31 @@ export default function OrgDetailPage() {
           <div className="flex items-center border-b border-border px-4">
             <div className="flex overflow-x-auto">
               {org.budgets.map(b => (
-                <button
-                  key={b.id}
-                  onClick={() => setActiveBudget(b.id)}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                    activeBudget === b.id
-                      ? "border-navy text-navy"
-                      : "border-transparent text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  {b.name}
-                  <span className="ml-2 text-xs text-ink-muted font-normal">{b.fiscalYear}</span>
-                </button>
+                <div key={b.id} className="flex items-center">
+                  <button
+                    onClick={() => setActiveBudget(b.id)}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                      activeBudget === b.id
+                        ? "border-navy text-navy"
+                        : "border-transparent text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    {b.name}
+                    <span className="ml-2 text-xs text-ink-muted font-normal">{b.fiscalYear}</span>
+                  </button>
+                  {canManageBudgets && activeBudget === b.id && (
+                    <button
+                      onClick={() => openEdit(b)}
+                      className="ml-0.5 p-1 rounded text-ink-muted hover:text-ink hover:bg-paper transition-colors"
+                      title="Edit budget"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6.293-6.293a1 1 0 011.414 0l1.586 1.586a1 1 0 010 1.414L12 14H9v-3z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21h18" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               ))}
               {/* Unlinked tab — only when org has multiple budgets AND there are unlinked requests */}
               {org.budgets.length > 1 && (unlinkedSpent > 0 || unlinkedReserved > 0) && (
@@ -343,6 +424,75 @@ export default function OrgDetailPage() {
           )}
         </div>
 
+        {/* Edit budget modal */}
+        {editBudget && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-ink">Edit Budget</h2>
+                <button onClick={() => { setEditBudget(null); setConfirmDelete(false); }} className="text-ink-muted hover:text-ink text-xl">&times;</button>
+              </div>
+              {editError && <div className="mb-4 text-sm text-red-600">{editError}</div>}
+              <form onSubmit={saveBudget} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-ink mb-1">Budget name</label>
+                  <input className={inputCls} value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink mb-1">Fiscal year</label>
+                  <input className={inputCls} value={editForm.fiscalYear} onChange={e => setEditForm(f => ({ ...f, fiscalYear: e.target.value }))} required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink mb-1">Allocated amount</label>
+                  <input className={inputCls} type="number" step="0.01" min="0" value={editForm.allocated} onChange={e => setEditForm(f => ({ ...f, allocated: e.target.value }))} required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink mb-1">Notes</label>
+                  <textarea className={inputCls} rows={2} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="submit" disabled={editSaving} className="flex-1 py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light disabled:opacity-60">
+                    {editSaving ? "Saving..." : "Save Changes"}
+                  </button>
+                  <button type="button" onClick={() => { setEditBudget(null); setConfirmDelete(false); }} className="px-4 py-2 border border-border rounded-md text-sm text-ink-secondary hover:bg-paper">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+              {isAdmin && (
+                <div className="mt-4 pt-4 border-t border-border">
+                  {!confirmDelete ? (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      className="w-full py-2 text-sm font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors"
+                    >
+                      Delete Budget
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-ink">
+                        Delete <strong>{editBudget.name}</strong>? Requests will be unlinked but not deleted.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={deleteBudget}
+                          disabled={deleting}
+                          className="flex-1 py-2 bg-red-600 text-white text-sm font-semibold rounded-md hover:bg-red-700 disabled:opacity-60"
+                        >
+                          {deleting ? "Deleting..." : "Confirm Delete"}
+                        </button>
+                        <button onClick={() => setConfirmDelete(false)} className="px-4 py-2 border border-border rounded-md text-sm text-ink-secondary hover:bg-paper">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Add budget modal */}
         {showAddBudget && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -385,6 +535,16 @@ export default function OrgDetailPage() {
                     onChange={e => setBudgetForm(f => ({ ...f, allocated: e.target.value }))}
                     placeholder="5000.00"
                     required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink mb-1">Notes</label>
+                  <textarea
+                    className={inputCls}
+                    rows={2}
+                    value={budgetForm.notes}
+                    onChange={e => setBudgetForm(f => ({ ...f, notes: e.target.value }))}
+                    placeholder="Optional notes"
                   />
                 </div>
                 <div className="flex gap-2 pt-1">
