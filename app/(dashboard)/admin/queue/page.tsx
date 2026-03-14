@@ -105,7 +105,7 @@ export default function AdminQueuePage() {
       body: JSON.stringify({ status: newStatus }),
     });
     // Flash the row as stamped
-    setStampedIds(prev => new Set([...prev, requestId]));
+    setStampedIds(prev => { const n = new Set(prev); n.add(requestId); return n; });
     if (newStatus === "PICKED_UP") {
       setCelebration(true);
       setTimeout(() => setCelebration(false), 4000);
