@@ -283,8 +283,13 @@ export default function RequestDetailPage() {
               <Detail label="Submitted By" value={request.submittedBy?.name || request.submittedBy?.email} />
               <Detail label="Priority" value={PRIORITY_LABELS[request.priority as keyof typeof PRIORITY_LABELS]} />
               <Detail label="Needed By" value={formatDate(request.neededBy)} />
-              <Detail label="Advisor" value={request.advisorName || request.advisorEmail} />
-              <Detail label="Advisor Email" value={request.advisorEmail} />
+              {/* Only show advisor if set and not the same person as the submitter */}
+              {request.advisorEmail && request.advisorEmail !== request.submittedBy?.email && request.advisorEmail !== "tbd@university.edu" && (
+                <>
+                  <Detail label="Advisor" value={request.advisorName || request.advisorEmail} />
+                  <Detail label="Advisor Email" value={request.advisorEmail} />
+                </>
+              )}
               {request.vendorName && <Detail label="Vendor" value={request.vendorName} />}
               {request.vendorUrl && (
                 <div>

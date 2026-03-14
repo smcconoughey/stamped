@@ -125,7 +125,8 @@ model OrganizationMember {
   organization   Organization @relation(fields: [organizationId], references: [id])
   userId         String
   user           User         @relation(fields: [userId], references: [id])
-  memberRole     String       @default("MEMBER")
+  memberRole     String       @default("MEMBER") // MEMBER | LEAD | OWNER
+  status         String       @default("APPROVED") // PENDING | APPROVED | REJECTED
   createdAt      DateTime     @default(now())
 
   @@unique([organizationId, userId])

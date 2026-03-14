@@ -30,7 +30,6 @@ type BudgetOption = { id: string; name: string; fiscalYear: string; orgCode: str
 type SortKey = "number" | "title" | "status" | "budget" | "org" | "amount" | "date";
 type SortDir = "asc" | "desc";
 
-// Generic click-outside dropdown
 function useClickOutside(cb: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -139,12 +138,19 @@ export default function RequestsPage() {
   const user = session?.user as any;
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user?.role);
   const isOrgLead = user?.role === "ORG_LEAD";
+  const isStudent = !isAdmin && !isOrgLead;
   const canEdit = isAdmin || isOrgLead;
 
   const [requests, setRequests] = useState<any[]>([]);
   const [budgets, setBudgets] = useState<BudgetOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [availableOrgs, setAvailableOrgs] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [pendingOrgs, setPendingOrgs] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [joiningOrg, setJoiningOrg] = useState<string | null>(null);
+  const [joinMsg, setJoinMsg] = useState<{ orgId: string; text: string; ok: boolean } | null>(null);
+  const [showJoinPanel, setShowJoinPanel] = useState(false);
   const [search, setSearch] = useState("");
+  const [activeOrg, setActiveOrg] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
@@ -169,17 +175,39 @@ export default function RequestsPage() {
     fetch("/api/budgets").then(r => r.json()).then(d => setBudgets(d.budgets || []));
   }, [canEdit]);
 
+  // For students: fetch orgs they could join (all orgs in tenant)
+  useEffect(() => {
+    if (!isStudent) return;
+    fetch("/api/organizations/available").then(r => r.ok ? r.json() : { orgs: [] }).then(d => {
+      setAvailableOrgs((d.orgs ?? []).filter((o: any) => !o.membership));
+      setPendingOrgs((d.orgs ?? []).filter((o: any) => o.membership?.status === "PENDING"));
+    });
+  }, [isStudent]);
+
   function handleSort(col: SortKey) {
     if (sortKey === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(col); setSortDir("asc"); }
   }
 
-  // Budget tabs
+  // Derive unique orgs from loaded requests (for student multi-org switcher)
+  const orgMap = new Map<string, { id: string; name: string; code: string }>();
+  for (const r of requests) {
+    if (r.organization) orgMap.set(r.organization.id, r.organization);
+  }
+  const orgList = Array.from(orgMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  const showOrgSwitcher = isStudent && orgList.length > 1;
+
+  // Filter by selected org first (students with multiple orgs)
+  const orgFiltered = (showOrgSwitcher && activeOrg !== "all")
+    ? requests.filter(r => r.organization?.id === activeOrg)
+    : requests;
+
+  // Budget tabs derived from org-filtered requests
   const budgetMap = new Map<string, { id: string; name: string; fiscalYear: string }>();
-  for (const r of requests) { if (r.budget) budgetMap.set(r.budget.id, r.budget); }
+  for (const r of orgFiltered) { if (r.budget) budgetMap.set(r.budget.id, r.budget); }
   const budgetTabs = Array.from(budgetMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
-  const tabFiltered = requests.filter(r => {
+  const tabFiltered = orgFiltered.filter(r => {
     if (activeTab === "cancelled") return r.status === "CANCELLED";
     if (activeTab === "all") return r.status !== "CANCELLED";
     return r.budget?.id === activeTab && r.status !== "CANCELLED";
@@ -189,7 +217,8 @@ export default function RequestsPage() {
     r.number?.toLowerCase().includes(search.toLowerCase()) ||
     r.title?.toLowerCase().includes(search.toLowerCase()) ||
     r.vendorName?.toLowerCase().includes(search.toLowerCase()) ||
-    r.budget?.name?.toLowerCase().includes(search.toLowerCase())
+    r.budget?.name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.submittedBy?.name?.toLowerCase().includes(search.toLowerCase())
   ) : tabFiltered;
 
   const STATUS_ORDER_MAP: Record<string, number> = Object.fromEntries(ALL_STATUSES.map((s, i) => [s, i]));
@@ -210,7 +239,7 @@ export default function RequestsPage() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  const cancelledCount = requests.filter(r => r.status === "CANCELLED").length;
+  const cancelledCount = orgFiltered.filter(r => r.status === "CANCELLED").length;
   const visibleIds = sorted.map(r => r.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id));
 
@@ -244,6 +273,20 @@ export default function RequestsPage() {
     } finally { setBulkLoading(false); }
   }
 
+  async function joinOrg(orgId: string) {
+    setJoiningOrg(orgId);
+    try {
+      const res = await fetch(`/api/organizations/${orgId}/members`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setJoinMsg({ orgId, text: data.isOwner ? "You're now the president of this org!" : "Request sent — waiting for approval.", ok: true });
+        fetchRequests();
+      } else {
+        setJoinMsg({ orgId, text: data.error || "Failed to join", ok: false });
+      }
+    } finally { setJoiningOrg(null); }
+  }
+
   async function handleDelete(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     if (!confirm("Permanently delete this request?")) return;
@@ -251,28 +294,115 @@ export default function RequestsPage() {
     await fetchRequests();
   }
 
+  // Active org label for header subtitle
+  const activeOrgObj = orgList.find(o => o.id === activeOrg);
+  const pageTitle = isAdmin ? "All Requests" : isOrgLead ? "Requests" : (orgList.length === 1 ? orgList[0].name : activeOrgObj?.name ?? "My Organizations");
+  const pageSubtitle = isAdmin
+    ? "View and manage all purchase requests"
+    : isOrgLead
+    ? "View and manage your organization's requests"
+    : orgList.length === 1
+    ? `${orgList[0].code} · ${orgFiltered.filter(r => r.status !== "CANCELLED").length} active requests`
+    : "All purchase requests across your organizations";
+
   const sharedSort = { sort: sortKey, dir: sortDir, onSort: handleSort };
 
   return (
     <div>
       <Header
-        title={isAdmin ? "All Requests" : "My Requests"}
-        subtitle={isAdmin ? "View and manage all purchase requests" : "Track purchase requests for your organization"}
+        title={pageTitle}
+        subtitle={pageSubtitle}
         actions={<Link href="/requests/new" className="btn-stamp">New Request</Link>}
       />
 
       <div className="p-6 space-y-4">
         <div className="flex gap-2">
-          <Input placeholder="Search number, title, vendor, budget..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
+          <Input placeholder="Search number, title, vendor, submitter..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
         </div>
+
+        {/* Pending approvals notice */}
+        {isStudent && pendingOrgs.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            Awaiting approval to join: <strong>{pendingOrgs.map(o => o.name).join(", ")}</strong>
+          </div>
+        )}
+
+        {/* Join org panel — shown to students with no approved orgs, or when toggled */}
+        {isStudent && !loading && (orgList.length === 0 || showJoinPanel) && availableOrgs.length > 0 && (
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-semibold text-ink">{orgList.length === 0 ? "Join an Organization" : "Join Another Organization"}</p>
+              {orgList.length > 0 && <button onClick={() => setShowJoinPanel(false)} className="text-xs text-ink-muted hover:text-ink">&times; Close</button>}
+            </div>
+            <p className="text-xs text-ink-muted mb-3">
+              {orgList.length === 0
+                ? "You're not a member of any organization yet. Request to join one below — the org president will approve you."
+                : "Request to join an additional organization."}
+            </p>
+            <div className="divide-y divide-border">
+              {availableOrgs.map(org => (
+                <div key={org.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm font-medium text-ink">{org.name}</span>
+                    <span className="ml-2 font-mono text-xs text-ink-muted">{org.code}</span>
+                  </div>
+                  {joinMsg?.orgId === org.id ? (
+                    <span className={`text-xs font-medium ${joinMsg.ok ? "text-green-700" : "text-red-600"}`}>{joinMsg.text}</span>
+                  ) : (
+                    <button
+                      onClick={() => joinOrg(org.id)}
+                      disabled={joiningOrg === org.id}
+                      className="px-3 py-1 text-xs font-semibold bg-navy text-white rounded hover:bg-navy-light disabled:opacity-60"
+                    >
+                      {joiningOrg === org.id ? "Requesting..." : "Request to Join"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Org switcher — only shown for students in multiple orgs */}
+        {isStudent && orgList.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {showOrgSwitcher && (
+              <>
+                <span className="text-xs font-medium text-ink-muted uppercase tracking-wide">Org:</span>
+                {[{ id: "all", name: "All", code: "" }, ...orgList].map(org => (
+                  <button
+                    key={org.id}
+                    onClick={() => { setActiveOrg(org.id); setActiveTab("all"); setSelected(new Set()); }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      activeOrg === org.id
+                        ? "bg-navy text-white border-navy"
+                        : "bg-white text-ink-secondary border-border hover:border-navy/40 hover:text-ink"
+                    }`}
+                  >
+                    {org.id === "all" ? "All" : org.code || org.name}
+                  </button>
+                ))}
+              </>
+            )}
+            {availableOrgs.length > 0 && !showJoinPanel && (
+              <button
+                onClick={() => setShowJoinPanel(true)}
+                className="px-3 py-1 rounded-full text-xs font-medium border border-dashed border-navy/40 text-navy hover:bg-navy/5 transition-colors"
+              >
+                + Join org
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Budget/Cost Center Tabs */}
         <div className="flex flex-wrap gap-0 border-b border-border">
           <TabBtn active={activeTab === "all"} onClick={() => { setActiveTab("all"); setSelected(new Set()); }}>
-            All Active <span className="ml-1.5 text-xs opacity-60">{requests.filter(r => r.status !== "CANCELLED").length}</span>
+            All Active <span className="ml-1.5 text-xs opacity-60">{orgFiltered.filter(r => r.status !== "CANCELLED").length}</span>
           </TabBtn>
           {budgetTabs.map(b => {
-            const count = requests.filter(r => r.budget?.id === b.id && r.status !== "CANCELLED").length;
+            const count = orgFiltered.filter(r => r.budget?.id === b.id && r.status !== "CANCELLED").length;
             return (
               <TabBtn key={b.id} active={activeTab === b.id} onClick={() => { setActiveTab(b.id); setSelected(new Set()); }}>
                 {b.name} <span className="ml-1.5 text-xs opacity-60">{count}</span>
@@ -287,31 +417,35 @@ export default function RequestsPage() {
         </div>
 
         {/* Bulk action bar */}
-        {canEdit && selected.size > 0 && (
+        {(canEdit || isStudent) && selected.size > 0 && (
           <div className="flex items-center gap-3 bg-navy/5 border border-navy/20 rounded-lg px-4 py-2.5 flex-wrap">
             <span className="text-sm font-medium text-navy">{selected.size} selected</span>
 
-            {/* Status change */}
-            <div className="flex items-center gap-2 border-r border-navy/20 pr-3">
-              <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
-                className="text-sm border border-border rounded-md px-2 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy">
-                <option value="">Status…</option>
-                {ALL_STATUSES.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
-              </select>
-              <Button onClick={applyBulkStatus} disabled={!bulkStatus || bulkLoading} size="sm">Apply</Button>
-            </div>
+            {canEdit && (
+              <>
+                {/* Status change */}
+                <div className="flex items-center gap-2 border-r border-navy/20 pr-3">
+                  <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
+                    className="text-sm border border-border rounded-md px-2 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy">
+                    <option value="">Status…</option>
+                    {ALL_STATUSES.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+                  </select>
+                  <Button onClick={applyBulkStatus} disabled={!bulkStatus || bulkLoading} size="sm">Apply</Button>
+                </div>
 
-            {/* Budget assign */}
-            {budgets.length > 0 && (
-              <div className="flex items-center gap-2 border-r border-navy/20 pr-3">
-                <select value={bulkBudgetId} onChange={e => setBulkBudgetId(e.target.value)}
-                  className="text-sm border border-border rounded-md px-2 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy">
-                  <option value="">Assign budget…</option>
-                  <option value="">— Remove budget</option>
-                  {budgets.map(b => <option key={b.id} value={b.id}>{b.orgCode} — {b.name} ({b.fiscalYear})</option>)}
-                </select>
-                <Button onClick={applyBulkBudget} disabled={bulkLoading} size="sm">Assign</Button>
-              </div>
+                {/* Budget assign */}
+                {budgets.length > 0 && (
+                  <div className="flex items-center gap-2 border-r border-navy/20 pr-3">
+                    <select value={bulkBudgetId} onChange={e => setBulkBudgetId(e.target.value)}
+                      className="text-sm border border-border rounded-md px-2 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy">
+                      <option value="">Assign budget…</option>
+                      <option value="">— Remove budget</option>
+                      {budgets.map(b => <option key={b.id} value={b.id}>{b.orgCode} — {b.name} ({b.fiscalYear})</option>)}
+                    </select>
+                    <Button onClick={applyBulkBudget} disabled={bulkLoading} size="sm">Assign</Button>
+                  </div>
+                )}
+              </>
             )}
 
             <button onClick={applyBulkDelete} disabled={bulkLoading}
@@ -341,12 +475,12 @@ export default function RequestsPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-paper/50">
                   <tr>
-                    {canEdit && <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-border" /></th>}
+                    {(canEdit || isStudent) && <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-border" /></th>}
                     <SortHeader label="Number" col="number" {...sharedSort} />
-                    <SortHeader label="Title" col="title" {...sharedSort} />
+                    <SortHeader label="Item" col="title" {...sharedSort} />
                     <SortHeader label="Status" col="status" {...sharedSort} />
                     <SortHeader label="Budget" col="budget" {...sharedSort} />
-                    {isAdmin && <SortHeader label="Org" col="org" {...sharedSort} />}
+                    {(isAdmin || (isStudent && orgList.length > 1)) && <SortHeader label="Org" col="org" {...sharedSort} />}
                     <SortHeader label="Amount" col="amount" {...sharedSort} />
                     <SortHeader label="Updated" col="date" {...sharedSort} />
                     <th className="px-4 py-2.5 w-8" />
@@ -354,22 +488,30 @@ export default function RequestsPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {sorted.map(req => {
+                    const isOwn = req.submittedBy?.id === user?.id;
                     const deletable = ["DRAFT", "SUBMITTED", "CANCELLED"].includes(req.status);
-                    const canDel = isAdmin || (isOrgLead && deletable) || (req.submittedById === user?.id && deletable);
+                    const canDel = isAdmin || (isOrgLead && deletable) || (isOwn && deletable);
                     return (
                       <tr key={req.id} className={`hover:bg-paper/70 transition-colors cursor-pointer group ${selected.has(req.id) ? "bg-navy/[0.03]" : ""}`}
                         onClick={() => window.location.href = `/requests/${req.id}`}>
-                        {canEdit && (
+                        {(canEdit || isStudent) && (
                           <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                             <input type="checkbox" checked={selected.has(req.id)} onChange={() => toggleOne(req.id)} className="rounded border-border" />
                           </td>
                         )}
                         <td className="px-4 py-3 whitespace-nowrap">
                           <Link href={`/requests/${req.id}`} className="font-mono text-xs text-navy hover:underline" onClick={e => e.stopPropagation()}>{req.number}</Link>
+                          {isStudent && isOwn && (
+                            <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-semibold bg-stamp/10 text-stamp border border-stamp/20">Mine</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 max-w-xs">
                           <span className="font-medium text-ink truncate block">{req.title}</span>
                           {req.vendorName && <span className="text-xs text-ink-muted truncate block">{req.vendorName}</span>}
+                          {/* Show submitter for non-own rows when student */}
+                          {isStudent && !isOwn && req.submittedBy && (
+                            <span className="text-xs text-ink-muted truncate block">by {req.submittedBy.name ?? req.submittedBy.email}</span>
+                          )}
                         </td>
                         <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                           <InlineStatus requestId={req.id} status={req.status} canEdit={canEdit} onChanged={fetchRequests} />
@@ -377,7 +519,7 @@ export default function RequestsPage() {
                         <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                           <InlineBudget requestId={req.id} budget={req.budget} budgets={budgets} canEdit={canEdit} onChanged={fetchRequests} />
                         </td>
-                        {isAdmin && (
+                        {(isAdmin || (isStudent && orgList.length > 1)) && (
                           <td className="px-4 py-3 hidden md:table-cell">
                             <span className="text-xs text-ink-secondary">{req.organization?.code}</span>
                             {req.organization?.costCenter && <span className="block text-xs text-ink-muted">CC: {req.organization.costCenter}</span>}

@@ -217,8 +217,13 @@ export async function POST(req: NextRequest) {
         currentNum++;
         const number = generateRequestNumber(prefix, currentNum);
 
-        const advisorEmail = col(row, "advisor_email", "contact_email", "e_mail_address", "email_address", "email");
-        const advisorName = col(row, "advisor_name", "person_to_contact_for_order", "person_to_contact", "contact_person", "ordered_by", "contact");
+        // Only use clearly advisor-specific column names — avoid generic "email" / "ordered_by"
+        // which typically hold the student's own contact info, not a faculty advisor
+        const rawAdvisorEmail = col(row, "advisor_email", "contact_email", "faculty_advisor_email", "advisor_e_mail");
+        const rawAdvisorName  = col(row, "advisor_name",  "faculty_advisor", "advisor");
+        // If the "advisor" email resolves to the submitter's own email, it's not an advisor
+        const advisorEmail = (rawAdvisorEmail && rawAdvisorEmail !== user.email) ? rawAdvisorEmail : "";
+        const advisorName  = rawAdvisorName || null;
 
         // Resolve budget — forceBudgetId from import UI takes priority; else from row column
         let budgetId: string | null = null;

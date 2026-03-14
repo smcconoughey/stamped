@@ -26,6 +26,14 @@ type Org = {
   budgets: Budget[];
 };
 
+type OrgMember = {
+  id: string;
+  memberRole: string; // MEMBER | LEAD | OWNER
+  status: string;     // PENDING | APPROVED | REJECTED
+  createdAt: string;
+  user: { id: string; name: string | null; email: string; role: string };
+};
+
 type Request = {
   id: string;
   number: string;
@@ -84,6 +92,11 @@ export default function OrgDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Members
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [membersError, setMembersError] = useState("");
+  const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
+
   // Edit budget modal
   const [editBudget, setEditBudget] = useState<Budget | null>(null);
   const [editForm, setEditForm] = useState({ name: "", fiscalYear: "", allocated: "", notes: "" });
@@ -93,6 +106,16 @@ export default function OrgDetailPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { fetchAll(); }, [id]);
+
+  async function fetchMembers() {
+    try {
+      const res = await fetch(`/api/organizations/${id}/members`);
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data.members ?? []);
+      }
+    } catch { /* non-fatal */ }
+  }
 
   async function fetchAll() {
     setLoading(true);
@@ -110,6 +133,7 @@ export default function OrgDetailPage() {
       setActiveBudget(orgData.org.budgets[0].id);
     }
     setLoading(false);
+    fetchMembers();
   }
 
   async function addBudget(e: React.FormEvent) {
@@ -135,6 +159,33 @@ export default function OrgDetailPage() {
       setError(d.error || "Failed to create budget");
     }
     setSaving(false);
+  }
+
+  async function memberAction(memberId: string, patch: Record<string, string>) {
+    setMemberActionLoading(memberId);
+    setMembersError("");
+    try {
+      const res = await fetch(`/api/organizations/${id}/members`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberId, ...patch }),
+      });
+      if (!res.ok) { const d = await res.json(); setMembersError(d.error || "Failed"); }
+      else await fetchMembers();
+    } finally { setMemberActionLoading(null); }
+  }
+
+  async function removeMember(memberId: string) {
+    if (!confirm("Remove this member from the organization?")) return;
+    setMemberActionLoading(memberId);
+    try {
+      await fetch(`/api/organizations/${id}/members`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberId }),
+      });
+      await fetchMembers();
+    } finally { setMemberActionLoading(null); }
   }
 
   function openEdit(b: Budget) {
@@ -226,6 +277,13 @@ export default function OrgDetailPage() {
     : budgetLineItems;
 
   const totalShown = lineItems.reduce((sum, r) => sum + ((r.totalActual ?? r.totalEstimated) ?? 0), 0);
+
+  // Member derived values
+  const owner = members.find(m => m.memberRole === "OWNER" && m.status === "APPROVED");
+  const pendingMembers = members.filter(m => m.status === "PENDING");
+  const approvedMembers = members.filter(m => m.status === "APPROVED");
+  const selfMember = members.find(m => m.user.id === user?.id);
+  const canManageMembers = isAdmin || selfMember?.memberRole === "OWNER";
 
   return (
     <div>
@@ -556,6 +614,110 @@ export default function OrgDetailPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Members panel — visible to admins and org leads/owners */}
+        {(canManageMembers || (selfMember?.status === "APPROVED")) && (
+          <div className="card p-0 overflow-hidden">
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-ink">Members</h3>
+                {owner && (
+                  <p className="text-xs text-ink-muted mt-0.5">
+                    President: <span className="font-medium text-ink">{owner.user.name ?? owner.user.email}</span>
+                  </p>
+                )}
+              </div>
+              {pendingMembers.length > 0 && canManageMembers && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                  {pendingMembers.length} pending
+                </span>
+              )}
+            </div>
+
+            {membersError && <p className="px-5 py-2 text-sm text-red-600">{membersError}</p>}
+
+            {/* Pending approvals */}
+            {canManageMembers && pendingMembers.length > 0 && (
+              <div className="border-b border-border bg-amber-50/60">
+                <p className="px-5 pt-3 pb-1 text-xs font-semibold text-amber-700 uppercase tracking-wide">Awaiting Approval</p>
+                {pendingMembers.map(m => (
+                  <div key={m.id} className="px-5 py-2.5 flex items-center gap-3 border-t border-amber-100 first:border-t-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-ink truncate">{m.user.name ?? m.user.email}</p>
+                      <p className="text-xs text-ink-muted truncate">{m.user.email}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => memberAction(m.id, { status: "APPROVED" })}
+                        disabled={memberActionLoading === m.id}
+                        className="px-2.5 py-1 bg-green-600 text-white text-xs font-semibold rounded hover:bg-green-700 disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => memberAction(m.id, { status: "REJECTED" })}
+                        disabled={memberActionLoading === m.id}
+                        className="px-2.5 py-1 border border-red-200 text-red-600 text-xs font-semibold rounded hover:bg-red-50 disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Approved members */}
+            <div>
+              {approvedMembers.length === 0 ? (
+                <p className="px-5 py-4 text-sm text-ink-muted">No members yet.</p>
+              ) : (
+                approvedMembers.map(m => {
+                  const roleCls = m.memberRole === "OWNER" ? "bg-navy/10 text-navy border-navy/20" :
+                                  m.memberRole === "LEAD"  ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
+                                                              "bg-paper text-ink-muted border-border";
+                  const roleLabel = m.memberRole === "OWNER" ? "President" : m.memberRole === "LEAD" ? "Lead" : "Member";
+                  return (
+                    <div key={m.id} className="px-5 py-2.5 flex items-center gap-3 border-t border-border first:border-t-0 hover:bg-paper/40 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-ink truncate">{m.user.name ?? m.user.email}</p>
+                        <p className="text-xs text-ink-muted truncate">{m.user.email}</p>
+                      </div>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${roleCls}`}>
+                        {roleLabel}
+                      </span>
+                      {canManageMembers && m.user.id !== user?.id && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          {/* Role change */}
+                          <select
+                            value={m.memberRole}
+                            onChange={e => memberAction(m.id, { memberRole: e.target.value })}
+                            disabled={!!memberActionLoading}
+                            className="text-xs border border-border rounded px-1.5 py-1 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-navy"
+                          >
+                            <option value="MEMBER">Member</option>
+                            <option value="LEAD">Lead</option>
+                            <option value="OWNER">President</option>
+                          </select>
+                          <button
+                            onClick={() => removeMember(m.id)}
+                            disabled={!!memberActionLoading}
+                            className="p-1 rounded text-ink-muted hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                            title="Remove member"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}

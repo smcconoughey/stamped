@@ -36,8 +36,17 @@ export async function GET(req: NextRequest) {
     const leadOrgIds = leadMemberships.map((m: { organizationId: string }) => m.organizationId);
     where.organizationId = { in: leadOrgIds };
   } else {
-    // regular students see only their own
-    where.submittedById = user.id;
+    // students see all requests for orgs they are APPROVED members of
+    const memberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, status: "APPROVED" },
+      select: { organizationId: true },
+    });
+    const memberOrgIds = memberships.map((m: { organizationId: string }) => m.organizationId);
+    if (memberOrgIds.length > 0) {
+      where.organizationId = { in: memberOrgIds };
+    } else {
+      where.submittedById = user.id; // no approved memberships — fallback to own requests
+    }
   }
 
   if (status) {
