@@ -172,7 +172,7 @@ export default function FinanceBudgetsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Allocated" value={formatCurrency(totalAllocated)} />
           <StatCard label="Spent" value={formatCurrency(totalSpent)} color="text-red-600" />
-          <StatCard label="Reserved / In-Flight" value={formatCurrency(totalReserved)} color="text-amber-700" />
+          <StatCard label="Pending / In-Flight" value={formatCurrency(totalReserved)} color="text-amber-700" />
           <StatCard
             label="Available"
             value={formatCurrency(totalAllocated - totalSpent - totalReserved)}
@@ -255,7 +255,7 @@ export default function FinanceBudgetsPage() {
                               <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden sm:table-cell">FY</th>
                               <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted">Allocated</th>
                               <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">Spent</th>
-                              <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">Reserved</th>
+                              <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted hidden md:table-cell">Pending</th>
                               <th className="px-4 py-2.5 text-right text-2xs font-semibold tracking-widest uppercase text-ink-muted">Available</th>
                               <th className="px-5 py-2.5 w-24" />
                             </tr>
@@ -377,7 +377,7 @@ export default function FinanceBudgetsPage() {
             <Field label="Notes">
               <input className={inputCls} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
             </Field>
-            <p className="text-xs text-ink-muted pt-1 border-t border-border">Spent/reserved are computed live from linked requests.</p>
+            <p className="text-xs text-ink-muted pt-1 border-t border-border">Spent/pending are computed live from linked requests.</p>
             <ModalButtons onCancel={() => setEditing(null)} saving={editSaving} label="Save" />
           </form>
         </Modal>

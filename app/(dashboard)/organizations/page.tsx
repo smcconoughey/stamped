@@ -196,7 +196,7 @@ export default function OrganizationsPage() {
             <StatCard label="Total Allocated" value={formatCurrency(totals.allocated)} sub={`across ${orgs.reduce((s,o) => s + o.budgetCount, 0)} budgets`} />
             <StatCard label="Spent" value={formatCurrency(totals.spent)} sub={`${Math.round((totals.spent / totals.allocated) * 100)}% of allocated`}
               color={overallUrgency === "danger" ? "text-red-600" : overallUrgency === "warn" ? "text-amber-600" : "text-emerald-700"} />
-            <StatCard label="Reserved" value={formatCurrency(totals.reserved)} sub="pending orders" color="text-indigo-600" />
+            <StatCard label="Pending" value={formatCurrency(totals.reserved)} sub="committed, not yet received" color="text-indigo-600" />
             <StatCard label="Available" value={formatCurrency(totals.available)}
               sub={overallUrgency === "danger" && daysLeft !== null
                 ? `⚠ Only ${daysLeft}d left in FY!`
@@ -247,7 +247,7 @@ export default function OrganizationsPage() {
             </div>
             <div className="flex items-center gap-4 mt-2 text-xs text-ink-muted">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Spent</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />Reserved</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />Pending</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-border inline-block" />Available</span>
             </div>
           </div>
@@ -270,7 +270,7 @@ export default function OrganizationsPage() {
                     <th className="px-4 py-2.5 text-left text-2xs font-semibold tracking-widest uppercase text-ink-muted">Budgets</th>
                     <SortTh label="Allocated" col="allocated" right />
                     <SortTh label="Spent" col="spent" right />
-                    <SortTh label="Reserved" col="available" right />
+                    <SortTh label="Pending" col="available" right />
                     <SortTh label="Available" col="available" right />
                     <SortTh label="Usage" col="pct" right />
                     <SortTh label="Requests" col="requests" right />

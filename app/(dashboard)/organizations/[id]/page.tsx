@@ -361,7 +361,7 @@ export default function OrgDetailPage() {
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <BudgetStat label="Allocated" value={formatCurrency(selectedBudget.allocated)} />
                     <BudgetStat label="Spent" value={formatCurrency(selectedBudget.spent)} />
-                    <BudgetStat label="Reserved" value={formatCurrency(selectedBudget.reserved)} />
+                    <BudgetStat label="Pending" value={formatCurrency(selectedBudget.reserved)} />
                     <BudgetStat
                       label="Available"
                       value={available != null ? formatCurrency(available) : "—"}
