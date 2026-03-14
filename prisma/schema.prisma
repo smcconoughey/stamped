@@ -40,6 +40,9 @@ model TenantSettings {
 
   requestPrefix        String @default("REQ")
   currentRequestNumber Int    @default(0)
+
+  currentFiscalYear    String?  // e.g. "FY2026"
+  fyEndDate            String?  // ISO date string e.g. "2026-05-15"
 }
 
 model User {
