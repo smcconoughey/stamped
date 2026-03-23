@@ -65,13 +65,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Non-admins can only edit their own draft requests
+  // Non-admins can only edit their own requests; admins can edit anything
   if (!isAdmin) {
     if (existing.submittedById !== user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (existing.status !== "DRAFT") {
-      return NextResponse.json({ error: "Cannot edit submitted request" }, { status: 403 });
+    if (["CANCELLED", "PICKED_UP"].includes(existing.status)) {
+      return NextResponse.json({ error: "Cannot edit a completed or cancelled request" }, { status: 403 });
     }
   }
 
@@ -79,23 +79,43 @@ export async function PATCH(
   if (isAdmin) {
     if (body.adminNotes !== undefined) allowedAdminFields.adminNotes = body.adminNotes;
     if (body.assignedToId !== undefined) allowedAdminFields.assignedToId = body.assignedToId || null;
-    if (body.totalActual !== undefined) allowedAdminFields.totalActual = body.totalActual;
+    if (body.totalActual !== undefined) allowedAdminFields.totalActual = parseFloat(body.totalActual);
   }
 
-  const updatableFields: any = {
-    ...allowedAdminFields,
-  };
-
+  const updatableFields: any = { ...allowedAdminFields };
   if (body.title !== undefined) updatableFields.title = body.title;
   if (body.description !== undefined) updatableFields.description = body.description;
   if (body.justification !== undefined) updatableFields.justification = body.justification;
   if (body.advisorEmail !== undefined) updatableFields.advisorEmail = body.advisorEmail;
   if (body.advisorName !== undefined) updatableFields.advisorName = body.advisorName;
-  if (body.vendorName !== undefined) updatableFields.vendorName = body.vendorName;
-  if (body.vendorUrl !== undefined) updatableFields.vendorUrl = body.vendorUrl;
+  if (body.vendorName !== undefined) updatableFields.vendorName = body.vendorName || null;
+  if (body.vendorUrl !== undefined) updatableFields.vendorUrl = body.vendorUrl || null;
   if (body.neededBy !== undefined) updatableFields.neededBy = body.neededBy ? new Date(body.neededBy) : null;
   if (body.priority !== undefined) updatableFields.priority = body.priority;
-  if (body.notes !== undefined) updatableFields.notes = body.notes;
+  if (body.notes !== undefined) updatableFields.notes = body.notes || null;
+
+  // Build changelog before saving
+  const TRACKED: Array<{ key: string; label: string }> = [
+    { key: "title", label: "Title" },
+    { key: "description", label: "Description" },
+    { key: "justification", label: "Justification" },
+    { key: "advisorEmail", label: "Advisor email" },
+    { key: "advisorName", label: "Advisor name" },
+    { key: "vendorName", label: "Vendor" },
+    { key: "vendorUrl", label: "Vendor URL" },
+    { key: "priority", label: "Priority" },
+    { key: "notes", label: "Notes" },
+  ];
+  const changedParts: string[] = [];
+  for (const { key, label } of TRACKED) {
+    if (body[key] === undefined) continue;
+    const oldVal = (existing as any)[key] ?? "";
+    const newVal = body[key] ?? "";
+    if (String(oldVal) !== String(newVal)) {
+      const short = (v: string) => v.length > 60 ? v.slice(0, 60) + "…" : v;
+      changedParts.push(oldVal ? `${label}: "${short(String(oldVal))}" → "${short(String(newVal))}"` : `${label} set to "${short(String(newVal))}"`);
+    }
+  }
 
   const updated = await prisma.purchaseRequest.update({
     where: { id: params.id },
@@ -108,7 +128,19 @@ export async function PATCH(
     },
   });
 
-  // Audit log for assignment change
+  // Audit log: field changes
+  if (changedParts.length > 0) {
+    await prisma.auditLog.create({
+      data: {
+        requestId: params.id,
+        userId: user.id,
+        action: "EDITED",
+        details: `Edited — ${changedParts.join("; ")}`,
+      },
+    });
+  }
+
+  // Audit log: assignment change
   if (isAdmin && body.assignedToId !== undefined) {
     await prisma.auditLog.create({
       data: {

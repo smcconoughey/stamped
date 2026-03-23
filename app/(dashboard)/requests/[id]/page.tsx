@@ -210,11 +210,16 @@ function StampButton({ targetStatus, onStamp, stamping }: {
 }
 
 // ─── Animated Timeline Node ──────────────────────────────────────────────────
-function TimelineNode({ status, isCompleted, isCurrent, isTerminal, justCompleted }: {
+function TimelineNode({ status, isCompleted, isCurrent, isTerminal, justCompleted, onClick }: {
   status: RequestStatus; isCompleted: boolean; isCurrent: boolean; isTerminal: boolean; justCompleted: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-1 min-w-[70px]">
+    <div
+      className={`flex flex-col items-center gap-1 min-w-[62px] ${onClick ? "cursor-pointer group/node" : ""}`}
+      onClick={onClick}
+      title={onClick ? `Set status to ${STATUS_LABELS[status]}` : undefined}
+    >
       <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
         isCompleted
           ? "bg-navy border-navy"
@@ -223,19 +228,19 @@ function TimelineNode({ status, isCompleted, isCurrent, isTerminal, justComplete
           : isCurrent && isTerminal
           ? "bg-red-100 border-red-400"
           : "bg-white border-border"
-      } ${justCompleted ? "scale-125" : ""}`}
+      } ${justCompleted ? "scale-125" : ""} ${onClick && !isCurrent ? "group-hover/node:border-navy/60 group-hover/node:scale-110" : ""}`}
         style={{ transition: "transform 0.3s cubic-bezier(0.34,1.56,0.64,1), background 0.4s, border-color 0.4s" }}>
         {isCompleted && (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={justCompleted ? "animate-ping-once" : ""}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
               style={justCompleted ? { strokeDasharray: 20, strokeDashoffset: 0, animation: "draw-check 0.3s ease-out" } : undefined} />
           </svg>
         )}
         {isCurrent && !isTerminal && <div className="w-2.5 h-2.5 bg-navy rounded-full animate-pulse" />}
       </div>
-      <span className={`text-2xs text-center leading-tight transition-colors duration-300 ${
+      <span className={`text-2xs text-center leading-tight transition-colors duration-300 whitespace-nowrap ${
         isCurrent ? "text-navy font-bold" : isCompleted ? "text-ink-secondary" : "text-ink-muted"
-      }`}>
+      } ${onClick && !isCurrent ? "group-hover/node:text-navy/70" : ""}`}>
         {STATUS_LABELS[status]}
       </span>
     </div>
@@ -263,6 +268,12 @@ export default function RequestDetailPage() {
   const [lastStampedStatus, setLastStampedStatus] = useState<string | null>(null);
   const [celebration, setCelebration] = useState(false);
   const [badgePop, setBadgePop] = useState(false);
+
+  // Edit form state
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState<any>({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
 
   useEffect(() => { fetchRequest(); }, [id]);
 
@@ -344,6 +355,45 @@ export default function RequestDetailPage() {
     if (res.ok) router.push("/requests");
   }
 
+  function openEdit() {
+    setEditForm({
+      title: request.title ?? "",
+      description: request.description ?? "",
+      justification: request.justification ?? "",
+      advisorEmail: request.advisorEmail ?? "",
+      advisorName: request.advisorName ?? "",
+      vendorName: request.vendorName ?? "",
+      vendorUrl: request.vendorUrl ?? "",
+      priority: request.priority ?? "NORMAL",
+      notes: request.notes ?? "",
+      ...(isAdmin ? { totalActual: request.totalActual != null ? String(request.totalActual) : "" } : {}),
+    });
+    setEditError("");
+    setEditMode(true);
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingEdit(true);
+    setEditError("");
+    try {
+      const res = await fetch(`/api/requests/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        setEditError(d.error || "Failed to save");
+        return;
+      }
+      setEditMode(false);
+      await fetchRequest();
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   if (loading) {
     return (
       <div>
@@ -374,6 +424,7 @@ export default function RequestDetailPage() {
 
   const canDelete = isAdmin || (["DRAFT","SUBMITTED","CANCELLED"].includes(request.status) && (user?.role === "ORG_LEAD" || request.submittedById === user?.id));
   const primaryNext = PRIMARY_NEXT[request.status];
+  const canEdit = isAdmin || (request.submittedById === user?.id && !["CANCELLED","PICKED_UP"].includes(request.status));
 
   return (
     <div>
@@ -432,29 +483,42 @@ export default function RequestDetailPage() {
           {/* Status Timeline */}
           <div className="card p-5">
             <h2 className="text-sm font-semibold text-ink mb-4">Status Timeline</h2>
-            <div className="flex items-center gap-0 overflow-x-auto pb-1">
-              {STATUS_FLOW.map((status, index) => {
-                const isCompleted = currentFlowIndex > index;
-                const isCurrent = currentFlowIndex === index;
-                const isTerminal = ["CANCELLED","REJECTED","ON_HOLD"].includes(request.status);
-                const justCompleted = lastStampedStatus != null && STATUS_FLOW.indexOf(lastStampedStatus as RequestStatus) >= index && isCompleted;
-                return (
-                  <div key={status} className="flex items-center">
-                    <TimelineNode status={status} isCompleted={isCompleted} isCurrent={isCurrent} isTerminal={isTerminal} justCompleted={justCompleted} />
-                    {index < STATUS_FLOW.length - 1 && (
-                      <div className="relative h-0.5 flex-1 min-w-[16px] mx-0.5 bg-border overflow-hidden">
-                        {isCompleted && (
-                          <div className="absolute inset-y-0 left-0 bg-navy"
-                            style={{ width: "100%", transition: "width 0.6s ease", transitionDelay: `${index * 80}ms` }} />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="overflow-x-auto pb-2">
+              <div className="flex items-start gap-0 min-w-max px-1">
+                {STATUS_FLOW.map((status, index) => {
+                  const isCompleted = currentFlowIndex > index;
+                  const isCurrent = currentFlowIndex === index;
+                  const isTerminal = ["CANCELLED","REJECTED","ON_HOLD"].includes(request.status);
+                  const justCompleted = lastStampedStatus != null && STATUS_FLOW.indexOf(lastStampedStatus as RequestStatus) >= index && isCompleted;
+                  const canClickNode = (isAdmin || isOrgLead) && !isCurrent && !stamping;
+                  return (
+                    <div key={status} className="flex items-center">
+                      <TimelineNode
+                        status={status}
+                        isCompleted={isCompleted}
+                        isCurrent={isCurrent}
+                        isTerminal={isTerminal}
+                        justCompleted={justCompleted}
+                        onClick={canClickNode ? () => handleStamp(status) : undefined}
+                      />
+                      {index < STATUS_FLOW.length - 1 && (
+                        <div className="relative h-0.5 w-8 mx-1 bg-border overflow-hidden flex-shrink-0">
+                          {isCompleted && (
+                            <div className="absolute inset-y-0 left-0 bg-navy"
+                              style={{ width: "100%", transition: "width 0.6s ease", transitionDelay: `${index * 80}ms` }} />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+            {(isAdmin || isOrgLead) && (
+              <p className="text-xs text-ink-muted mt-2">Click any step to jump to that status.</p>
+            )}
             {["CANCELLED","REJECTED","ON_HOLD"].includes(request.status) && (
-              <div className="mt-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+              <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
                 This request is currently <strong>{STATUS_LABELS[request.status as RequestStatus]}</strong>.
               </div>
             )}
@@ -462,36 +526,103 @@ export default function RequestDetailPage() {
 
           {/* Request Details */}
           <div className="card p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-ink border-b border-border pb-3">Request Details</h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <Detail label="Organization" value={request.organization?.name} />
-              <Detail label="Submitted By" value={request.submittedBy?.name || request.submittedBy?.email} />
-              <Detail label="Priority" value={PRIORITY_LABELS[request.priority as keyof typeof PRIORITY_LABELS]} />
-              <Detail label="Needed By" value={formatDate(request.neededBy)} />
-              {request.advisorEmail && request.advisorEmail !== request.submittedBy?.email && request.advisorEmail !== "tbd@university.edu" && (
-                <>
-                  <Detail label="Advisor" value={request.advisorName || request.advisorEmail} />
-                  <Detail label="Advisor Email" value={request.advisorEmail} />
-                </>
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-sm font-semibold text-ink">Request Details</h2>
+              {canEdit && !editMode && (
+                <button onClick={openEdit} className="flex items-center gap-1 text-xs text-navy hover:underline">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  Edit
+                </button>
               )}
-              {request.vendorName && <Detail label="Vendor" value={request.vendorName} />}
-              {request.vendorUrl && (
-                <div>
-                  <p className="text-xs font-medium text-ink-muted mb-0.5">Vendor URL</p>
-                  <a href={request.vendorUrl} target="_blank" rel="noreferrer" className="text-navy text-sm hover:underline truncate block">{request.vendorUrl}</a>
+            </div>
+
+            {editMode ? (
+              <form onSubmit={handleSaveEdit} className="space-y-3">
+                {editError && <p className="text-sm text-red-600">{editError}</p>}
+                <EditField label="Title *">
+                  <input className={inputCls} value={editForm.title} onChange={e => setEditForm((f: any) => ({ ...f, title: e.target.value }))} required />
+                </EditField>
+                <EditField label="Description">
+                  <textarea className={inputCls} rows={2} value={editForm.description} onChange={e => setEditForm((f: any) => ({ ...f, description: e.target.value }))} />
+                </EditField>
+                <EditField label="Justification *">
+                  <textarea className={inputCls} rows={3} value={editForm.justification} onChange={e => setEditForm((f: any) => ({ ...f, justification: e.target.value }))} required />
+                </EditField>
+                <div className="grid grid-cols-2 gap-3">
+                  <EditField label="Priority">
+                    <select className={inputCls} value={editForm.priority} onChange={e => setEditForm((f: any) => ({ ...f, priority: e.target.value }))}>
+                      {Object.entries(PRIORITY_LABELS).map(([v, l]) => <option key={v} value={v}>{l as string}</option>)}
+                    </select>
+                  </EditField>
+                  <EditField label="Advisor email">
+                    <input className={inputCls} type="email" value={editForm.advisorEmail} onChange={e => setEditForm((f: any) => ({ ...f, advisorEmail: e.target.value }))} />
+                  </EditField>
+                  <EditField label="Advisor name">
+                    <input className={inputCls} value={editForm.advisorName} onChange={e => setEditForm((f: any) => ({ ...f, advisorName: e.target.value }))} />
+                  </EditField>
+                  <EditField label="Vendor">
+                    <input className={inputCls} value={editForm.vendorName} onChange={e => setEditForm((f: any) => ({ ...f, vendorName: e.target.value }))} />
+                  </EditField>
                 </div>
-              )}
-            </div>
-            {request.description && (
-              <div>
-                <p className="text-xs font-medium text-ink-muted mb-1">Description</p>
-                <p className="text-sm text-ink">{request.description}</p>
-              </div>
+                <EditField label="Vendor URL">
+                  <input className={inputCls} type="url" value={editForm.vendorUrl} onChange={e => setEditForm((f: any) => ({ ...f, vendorUrl: e.target.value }))} placeholder="https://…" />
+                </EditField>
+                <EditField label="Notes">
+                  <textarea className={inputCls} rows={2} value={editForm.notes} onChange={e => setEditForm((f: any) => ({ ...f, notes: e.target.value }))} />
+                </EditField>
+                {isAdmin && (
+                  <EditField label="Actual total ($)">
+                    <input className={inputCls} type="number" step="0.01" min="0" value={editForm.totalActual} onChange={e => setEditForm((f: any) => ({ ...f, totalActual: e.target.value }))} placeholder="0.00" />
+                  </EditField>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button type="submit" disabled={savingEdit} className="flex-1 py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light disabled:opacity-60">
+                    {savingEdit ? "Saving…" : "Save Changes"}
+                  </button>
+                  <button type="button" onClick={() => setEditMode(false)} className="px-4 py-2 border border-border rounded-md text-sm text-ink-secondary hover:bg-paper">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <Detail label="Organization" value={request.organization?.name} />
+                  <Detail label="Submitted By" value={request.submittedBy?.name || request.submittedBy?.email} />
+                  <Detail label="Priority" value={PRIORITY_LABELS[request.priority as keyof typeof PRIORITY_LABELS]} />
+                  <Detail label="Needed By" value={formatDate(request.neededBy)} />
+                  {request.advisorEmail && request.advisorEmail !== request.submittedBy?.email && request.advisorEmail !== "tbd@university.edu" && (
+                    <>
+                      <Detail label="Advisor" value={request.advisorName || request.advisorEmail} />
+                      <Detail label="Advisor Email" value={request.advisorEmail} />
+                    </>
+                  )}
+                  {request.vendorName && <Detail label="Vendor" value={request.vendorName} />}
+                  {request.vendorUrl && (
+                    <div>
+                      <p className="text-xs font-medium text-ink-muted mb-0.5">Vendor URL</p>
+                      <a href={request.vendorUrl} target="_blank" rel="noreferrer" className="text-navy text-sm hover:underline truncate block">{request.vendorUrl}</a>
+                    </div>
+                  )}
+                </div>
+                {request.description && (
+                  <div>
+                    <p className="text-xs font-medium text-ink-muted mb-1">Description</p>
+                    <p className="text-sm text-ink">{request.description}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs font-medium text-ink-muted mb-1">Justification</p>
+                  <p className="text-sm text-ink">{request.justification}</p>
+                </div>
+                {request.notes && (
+                  <div>
+                    <p className="text-xs font-medium text-ink-muted mb-1">Notes</p>
+                    <p className="text-sm text-ink">{request.notes}</p>
+                  </div>
+                )}
+              </>
             )}
-            <div>
-              <p className="text-xs font-medium text-ink-muted mb-1">Justification</p>
-              <p className="text-sm text-ink">{request.justification}</p>
-            </div>
           </div>
 
           {/* Line Items */}
@@ -538,22 +669,26 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {/* Activity Log */}
+          {/* Activity Log / Changelog */}
           <div className="card p-5">
             <h2 className="text-sm font-semibold text-ink border-b border-border pb-3 mb-4">Activity Log</h2>
             {request.auditLogs.length === 0 ? (
               <p className="text-sm text-ink-muted">No activity recorded yet.</p>
             ) : (
               <div className="space-y-3">
-                {request.auditLogs.map((log: any) => (
-                  <div key={log.id} className="flex gap-3">
-                    <div className="flex-shrink-0 w-1.5 h-1.5 bg-navy rounded-full mt-2" />
-                    <div>
-                      <p className="text-sm text-ink">{log.details || log.action}</p>
-                      <p className="text-xs text-ink-muted mt-0.5">{log.user?.name || "System"} &middot; {formatDateTime(log.createdAt)}</p>
+                {request.auditLogs.map((log: any) => {
+                  const isEdit = log.action === "EDITED";
+                  const isStatus = log.action === "STATUS_CHANGED";
+                  return (
+                    <div key={log.id} className="flex gap-3">
+                      <div className={`flex-shrink-0 w-1.5 h-1.5 rounded-full mt-2 ${isEdit ? "bg-amber-400" : isStatus ? "bg-navy" : "bg-ink-muted"}`} />
+                      <div className="min-w-0">
+                        <p className="text-sm text-ink break-words">{log.details || log.action}</p>
+                        <p className="text-xs text-ink-muted mt-0.5">{log.user?.name || log.user?.email || "System"} &middot; {formatDateTime(log.createdAt)}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -693,6 +828,17 @@ export default function RequestDetailPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const inputCls = "w-full px-3 py-2 border border-border rounded-md text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-navy focus:border-navy";
+
+function EditField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-ink-muted mb-1">{label}</label>
+      {children}
     </div>
   );
 }
