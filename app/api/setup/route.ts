@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import bcrypt from "bcryptjs";
 
 export async function GET() {
   const count = await prisma.user.count();
@@ -18,10 +19,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Setup already complete." }, { status: 409 });
   }
 
-  const { name, email, tenantName, tenantDomain } = await req.json();
+  const { name, email, password, tenantName, tenantDomain } = await req.json();
 
-  if (!email || !tenantName || !tenantDomain) {
-    return NextResponse.json({ error: "email, tenantName, and tenantDomain are required." }, { status: 400 });
+  if (!email || !password || !tenantName || !tenantDomain) {
+    return NextResponse.json({ error: "email, password, tenantName, and tenantDomain are required." }, { status: 400 });
+  }
+
+  if (password.length < 8) {
+    return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
 
   const slug = tenantDomain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "-");
@@ -40,6 +45,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  const passwordHash = await bcrypt.hash(password, 12);
+
   const user = await prisma.user.create({
     data: {
       email,
@@ -47,6 +54,7 @@ export async function POST(req: NextRequest) {
       role: "SUPER_ADMIN",
       tenantId: tenant.id,
       active: true,
+      password: passwordHash,
     },
   });
 
