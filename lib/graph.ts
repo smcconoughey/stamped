@@ -7,8 +7,18 @@
  *
  * Requires IT admin consent in Azure AD for these application permissions.
  *
- * Setup:
- *   MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_EMAIL_ADDRESS
+ * ── Single-app setup (recommended) ───────────────────────────────────────────
+ * You can reuse the SAME Azure AD app registration for both SSO and email.
+ * Just add application permissions (not delegated) to your SSO app:
+ *   Mail.Send, Mail.ReadWrite
+ * Then grant admin consent and set MS_EMAIL_ADDRESS to your shared mailbox.
+ * Leave MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET unset — this file
+ * will automatically fall back to AZURE_AD_TENANT_ID / AZURE_AD_CLIENT_ID /
+ * AZURE_AD_CLIENT_SECRET.
+ *
+ * ── Separate app setup ────────────────────────────────────────────────────────
+ * Set MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_EMAIL_ADDRESS to use
+ * a dedicated app registration for email only.
  */
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -26,13 +36,19 @@ async function getAccessToken(): Promise<string> {
     return _tokenCache.token;
   }
 
-  const tenantId = process.env.MS_TENANT_ID;
-  const clientId = process.env.MS_CLIENT_ID;
-  const clientSecret = process.env.MS_CLIENT_SECRET;
+  // MS_* vars take priority; fall back to AZURE_AD_* so a single app registration works for both SSO and email
+  const tenantId = process.env.MS_TENANT_ID || process.env.AZURE_AD_TENANT_ID;
+  const clientId = process.env.MS_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID;
+  const clientSecret = process.env.MS_CLIENT_SECRET || process.env.AZURE_AD_CLIENT_SECRET;
 
   if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("Microsoft Graph not configured. Set MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET.");
+    throw new Error("Microsoft Graph not configured. Set MS_TENANT_ID + MS_CLIENT_ID + MS_CLIENT_SECRET, or reuse your SSO app by setting AZURE_AD_* vars and adding Mail.Send / Mail.ReadWrite application permissions.");
   }
+
+  // If using the SSO tenant ID ("common" or "organizations"), we need the actual tenant ID for client credentials
+  const resolvedTenantId = (tenantId === "common" || tenantId === "organizations")
+    ? (() => { throw new Error('MS_TENANT_ID must be your specific Azure AD tenant ID (not "common") for email sending. Find it in the Azure portal under Azure Active Directory → Overview.'); })()
+    : tenantId;
 
   const params = new URLSearchParams({
     grant_type: "client_credentials",
@@ -42,7 +58,7 @@ async function getAccessToken(): Promise<string> {
   });
 
   const res = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    `https://login.microsoftonline.com/${resolvedTenantId}/oauth2/v2.0/token`,
     { method: "POST", body: params }
   );
 
@@ -241,8 +257,10 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+// Configured if we have credentials (either dedicated MS_* vars or SSO AZURE_AD_* fallback)
+// and a mailbox to send from. The tenant must be a real tenant ID, not "common".
 export const graphConfigured =
-  !!process.env.MS_TENANT_ID &&
-  !!process.env.MS_CLIENT_ID &&
-  !!process.env.MS_CLIENT_SECRET &&
+  !!(process.env.MS_TENANT_ID || (process.env.AZURE_AD_TENANT_ID && process.env.AZURE_AD_TENANT_ID !== "common")) &&
+  !!(process.env.MS_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID) &&
+  !!(process.env.MS_CLIENT_SECRET || process.env.AZURE_AD_CLIENT_SECRET) &&
   !!process.env.MS_EMAIL_ADDRESS;

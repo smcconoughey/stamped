@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendMail, graphConfigured } from "@/lib/graph";
+import { sendEmail } from "@/lib/mailer";
 import { generateApprovalEmailDraft } from "@/lib/claude";
 
 export async function POST(req: NextRequest) {
@@ -68,35 +68,33 @@ export async function POST(req: NextRequest) {
   });
 
   const subject = `[Stamped] Approval Request: ${request.number} — ${request.title}`;
-
-  if (!graphConfigured) {
-    // Dev mode: return the draft without sending
-    return NextResponse.json({
-      mode: "draft",
-      to: request.advisorEmail,
-      subject,
-      body: emailBody,
-      note: "Graph not configured — email not sent. Configure MS_* env vars to enable sending.",
-    });
-  }
+  const bodyHtml = `<pre style="font-family: sans-serif; white-space: pre-wrap;">${emailBody}</pre>`;
 
   try {
-    const { messageId } = await sendMail({
+    const result = await sendEmail({
       to: request.advisorEmail,
       subject,
-      bodyHtml: `<pre style="font-family: sans-serif; white-space: pre-wrap;">${emailBody}</pre>`,
-      replyTo: process.env.MS_EMAIL_ADDRESS,
+      bodyHtml,
+      bodyText: emailBody,
     });
 
-    // Record the approval row (upsert in case it already exists)
+    if (!result.sent) {
+      // No email backend configured — return draft for manual sending
+      return NextResponse.json({
+        mode: "draft",
+        to: request.advisorEmail,
+        subject,
+        body: emailBody,
+        note: "No email provider configured. Set SMTP_HOST/SMTP_USER/SMTP_PASS (easiest) or MS_EMAIL_ADDRESS + Azure AD credentials.",
+      });
+    }
+
+    const messageId = result.via === "graph" ? result.messageId ?? "" : "";
+
     const approval = existingPending
       ? await prisma.approval.update({
           where: { id: existingPending.id },
-          data: {
-            emailSentAt: new Date(),
-            emailMessageId: messageId,
-            status: "PENDING",
-          },
+          data: { emailSentAt: new Date(), emailMessageId: messageId, status: "PENDING" },
         })
       : await prisma.approval.create({
           data: {
@@ -109,7 +107,6 @@ export async function POST(req: NextRequest) {
           },
         });
 
-    // Advance status to PENDING_APPROVAL if still SUBMITTED
     if (request.status === "SUBMITTED") {
       await prisma.purchaseRequest.update({
         where: { id: request.id },
@@ -122,11 +119,11 @@ export async function POST(req: NextRequest) {
         requestId: request.id,
         userId: (session.user as any).id,
         action: "EMAIL_SENT",
-        details: `Approval email sent to ${request.advisorEmail} (msgId: ${messageId})`,
+        details: `Approval email sent to ${request.advisorEmail} via ${result.via}${messageId ? ` (msgId: ${messageId})` : ""}`,
       },
     });
 
-    return NextResponse.json({ success: true, approvalId: approval.id, messageId });
+    return NextResponse.json({ success: true, approvalId: approval.id, messageId, via: result.via });
   } catch (err: any) {
     console.error("send-approval error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
