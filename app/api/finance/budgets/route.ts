@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
           reserved += unlinkedReservedByOrg[org.id] ?? 0;
         }
 
-        return { id: b.id, name: b.name, fiscalYear: b.fiscalYear, allocated: b.allocated, spent, reserved, notes: b.notes };
+        return { id: b.id, name: b.name, fiscalYear: b.fiscalYear, allocated: b.allocated, spent, reserved, costCenter: b.costCenter, projectNumber: b.projectNumber, notes: b.notes };
       }),
       // Unlinked amounts that couldn't be attributed (only when multiple budgets exist)
       unlinkedSpent: budgets.length !== 1 ? (unlinkedSpentByOrg[org.id] ?? 0) : 0,

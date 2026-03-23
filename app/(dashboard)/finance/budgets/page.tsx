@@ -13,6 +13,8 @@ type Budget = {
   allocated: number;
   spent: number;
   reserved: number;
+  costCenter: string | null;
+  projectNumber: string | null;
   notes: string | null;
 };
 
@@ -41,12 +43,12 @@ export default function FinanceBudgetsPage() {
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null);
 
   const [addingTo, setAddingTo] = useState<Org | null>(null);
-  const [addForm, setAddForm] = useState({ name: "", fiscalYear: "", allocated: "", notes: "" });
+  const [addForm, setAddForm] = useState({ name: "", fiscalYear: "", allocated: "", costCenter: "", projectNumber: "", notes: "" });
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState("");
 
   const [editing, setEditing] = useState<{ org: Org; budget: Budget } | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", fiscalYear: "", allocated: "", notes: "" });
+  const [editForm, setEditForm] = useState({ name: "", fiscalYear: "", allocated: "", costCenter: "", projectNumber: "", notes: "" });
   const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => { fetchBudgets(); }, [activeFY]);
@@ -82,11 +84,11 @@ export default function FinanceBudgetsPage() {
     const res = await fetch(`/api/organizations/${addingTo.id}/budgets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(addForm),
+      body: JSON.stringify({ ...addForm }),
     });
     if (res.ok) {
       setAddingTo(null);
-      setAddForm({ name: "", fiscalYear: activeFY, allocated: "", notes: "" });
+      setAddForm({ name: "", fiscalYear: activeFY, allocated: "", costCenter: "", projectNumber: "", notes: "" });
       await fetchBudgets();
     } else {
       setAddError((await res.json()).error || "Failed");
@@ -120,7 +122,7 @@ export default function FinanceBudgetsPage() {
 
   function openEdit(org: Org, b: Budget) {
     setEditing({ org, budget: b });
-    setEditForm({ name: b.name, fiscalYear: b.fiscalYear, allocated: String(b.allocated), notes: b.notes ?? "" });
+    setEditForm({ name: b.name, fiscalYear: b.fiscalYear, allocated: String(b.allocated), costCenter: b.costCenter ?? "", projectNumber: b.projectNumber ?? "", notes: b.notes ?? "" });
   }
 
   const allBudgets = orgs.flatMap((o) => o.budgets);
@@ -268,6 +270,14 @@ export default function FinanceBudgetsPage() {
                                 <tr key={b.id} className="hover:bg-paper/40 transition-colors group">
                                   <td className="px-5 py-3">
                                     <div className="font-medium text-ink">{b.name}</div>
+                                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                      {b.projectNumber && (
+                                        <span className="text-xs font-mono bg-navy/10 text-navy px-1.5 py-0.5 rounded">{b.projectNumber}</span>
+                                      )}
+                                      {b.costCenter && (
+                                        <span className="text-xs text-ink-muted font-mono">CC: {b.costCenter}</span>
+                                      )}
+                                    </div>
                                     <div className="mt-1.5 flex items-center gap-2">
                                       <div className="w-28 h-1 bg-border rounded-full overflow-hidden">
                                         <div
@@ -323,7 +333,7 @@ export default function FinanceBudgetsPage() {
                           <button
                             onClick={() => {
                               setAddingTo(org);
-                              setAddForm({ name: "", fiscalYear: activeFY || new Date().getFullYear().toString(), allocated: "", notes: "" });
+                              setAddForm({ name: "", fiscalYear: activeFY || new Date().getFullYear().toString(), allocated: "", costCenter: "", projectNumber: "", notes: "" });
                               setAddError("");
                             }}
                             className="text-xs px-3 py-1.5 bg-navy text-white rounded font-medium hover:bg-navy-light"
@@ -345,9 +355,17 @@ export default function FinanceBudgetsPage() {
         <Modal title={`Add Budget — ${addingTo.name}`} onClose={() => setAddingTo(null)}>
           <form onSubmit={handleAdd} className="space-y-3">
             {addError && <p className="text-sm text-red-600">{addError}</p>}
-            <Field label="Budget / cost center name *">
+            <Field label="Budget nickname *">
               <input className={inputCls} value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} placeholder="COE Budget" required />
             </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Project number">
+                <input className={inputCls} value={addForm.projectNumber} onChange={e => setAddForm(f => ({ ...f, projectNumber: e.target.value }))} placeholder="PJ20006" />
+              </Field>
+              <Field label="Cost center">
+                <input className={inputCls} value={addForm.costCenter} onChange={e => setAddForm(f => ({ ...f, costCenter: e.target.value }))} placeholder="CC-1234" />
+              </Field>
+            </div>
             <Field label="Fiscal year *">
               <input className={inputCls} value={addForm.fiscalYear} onChange={e => setAddForm(f => ({ ...f, fiscalYear: e.target.value }))} placeholder="FY2026" required />
             </Field>
@@ -365,9 +383,17 @@ export default function FinanceBudgetsPage() {
       {editing && (
         <Modal title={`Edit — ${editing.budget.name}`} onClose={() => setEditing(null)}>
           <form onSubmit={handleEdit} className="space-y-3">
-            <Field label="Budget name *">
+            <Field label="Budget nickname *">
               <input className={inputCls} value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} required />
             </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Project number">
+                <input className={inputCls} value={editForm.projectNumber} onChange={e => setEditForm(f => ({ ...f, projectNumber: e.target.value }))} placeholder="PJ20006" />
+              </Field>
+              <Field label="Cost center">
+                <input className={inputCls} value={editForm.costCenter} onChange={e => setEditForm(f => ({ ...f, costCenter: e.target.value }))} placeholder="CC-1234" />
+              </Field>
+            </div>
             <Field label="Fiscal year *">
               <input className={inputCls} value={editForm.fiscalYear} onChange={e => setEditForm(f => ({ ...f, fiscalYear: e.target.value }))} required />
             </Field>

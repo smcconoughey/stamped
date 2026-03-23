@@ -17,15 +17,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const org = await prisma.organization.findFirst({ where: { id: params.id, tenantId: user.tenantId } });
   if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { name, fiscalYear, allocated, notes } = await req.json();
+  const { name, fiscalYear, allocated, costCenter, projectNumber, notes } = await req.json();
   if (!name || !fiscalYear || allocated == null) {
     return NextResponse.json({ error: "name, fiscalYear, and allocated are required" }, { status: 400 });
   }
 
   const budget = await prisma.budget.upsert({
     where: { organizationId_fiscalYear_name: { organizationId: params.id, fiscalYear, name } },
-    create: { organizationId: params.id, name, fiscalYear, allocated: parseFloat(allocated), notes: notes || null },
-    update: { allocated: parseFloat(allocated), notes: notes || null },
+    create: { organizationId: params.id, name, fiscalYear, allocated: parseFloat(allocated), costCenter: costCenter || null, projectNumber: projectNumber || null, notes: notes || null },
+    update: { allocated: parseFloat(allocated), costCenter: costCenter || null, projectNumber: projectNumber || null, notes: notes || null },
   });
 
   return NextResponse.json({ budget });
@@ -41,13 +41,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const org = await prisma.organization.findFirst({ where: { id: params.id, tenantId: user.tenantId } });
   if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { budgetId, name, fiscalYear, allocated, notes } = await req.json();
+  const { budgetId, name, fiscalYear, allocated, costCenter, projectNumber, notes } = await req.json();
   if (!budgetId) return NextResponse.json({ error: "budgetId required" }, { status: 400 });
 
   const update: any = {};
   if (name !== undefined) update.name = name;
   if (fiscalYear !== undefined) update.fiscalYear = fiscalYear;
   if (allocated !== undefined) update.allocated = parseFloat(allocated);
+  if (costCenter !== undefined) update.costCenter = costCenter || null;
+  if (projectNumber !== undefined) update.projectNumber = projectNumber || null;
   if (notes !== undefined) update.notes = notes || null;
 
   const budget = await prisma.budget.update({ where: { id: budgetId }, data: update });

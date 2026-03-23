@@ -144,6 +144,8 @@ model Budget {
   allocated      Float
   spent          Float        @default(0)
   reserved       Float        @default(0)
+  costCenter     String?      // e.g. "CC-1234"
+  projectNumber  String?      // e.g. "PJ20006"
   notes          String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt

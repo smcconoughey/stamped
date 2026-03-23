@@ -145,7 +145,7 @@ const IMPORT_SCHEMAS = {
     priorityValues: ["LOW", "NORMAL", "HIGH", "URGENT"],
   },
   budgets: {
-    fields: ["organization", "budget_name", "fiscal_year", "allocated", "notes"],
+    fields: ["organization", "budget_name", "project_number", "cost_center", "fiscal_year", "allocated", "notes"],
     statusValues: [] as string[],
     priorityValues: [] as string[],
   },

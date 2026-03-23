@@ -17,8 +17,8 @@ const TEMPLATES: Record<TabId, { headers: string[]; example: Record<string, stri
     example: { organization: "Robotics Club", title: "Arduino Mega", justification: "For robot build", advisor_email: "prof@erau.edu", vendor: "DigiKey", quantity: "5", unit_price: "45.00", url: "https://digikey.com", priority: "HIGH", needed_by: "2025-03-01" },
   },
   budgets: {
-    headers: ["organization", "budget_name", "fiscal_year", "allocated", "notes"],
-    example: { organization: "Robotics Club", budget_name: "COE Budget", fiscal_year: "FY2025", allocated: "5000.00", notes: "College of Engineering allocation" },
+    headers: ["organization", "budget_name", "project_number", "cost_center", "fiscal_year", "allocated", "notes"],
+    example: { organization: "Robotics Club", budget_name: "COE Budget", project_number: "PJ20006", cost_center: "CC-1234", fiscal_year: "FY2025", allocated: "5000.00", notes: "College of Engineering allocation" },
   },
   members: {
     headers: ["email", "name", "role", "organization", "password"],
@@ -183,37 +183,40 @@ function ImportInner() {
     setAiNormalized(false);
     setAiWarnings([]);
     setAiMetadata({});
+    let parsed: Row[] = [];
+    let hints: ColorHint[] = [];
+    let metadata: Record<string, string> = {};
     try {
-      const { rows: parsed, colorHints: hints, metadata } = await parseFile(file);
+      ({ rows: parsed, colorHints: hints, metadata } = await parseFile(file));
       setRows(parsed);
       setColorHints(hints);
       setAiMetadata(metadata);
       setFileName(file.name);
     } catch {
       setError("Could not parse file. Make sure it's a valid CSV or XLSX.");
+      return;
     }
-  }
-
-  async function normalizeWithAI() {
-    if (!rows.length) return;
-    setNormalizing(true);
-    setError("");
-    try {
-      const res = await fetch("/api/import/ai-parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, colorHints, type: tab, knownMetadata: aiMetadata }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "AI parse failed"); return; }
-      setRows(data.rows);
-      setAiNormalized(true);
-      setAiWarnings(data.warnings ?? []);
-      setAiMetadata(data.metadata ?? {});
-    } catch {
-      setError("AI normalization failed. You can still import using the raw columns.");
-    } finally {
-      setNormalizing(false);
+    // Auto-normalize with AI immediately
+    if (parsed.length) {
+      setNormalizing(true);
+      try {
+        const res = await fetch("/api/import/ai-parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: parsed, colorHints: hints, type: tab, knownMetadata: metadata }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setRows(data.rows);
+          setAiNormalized(true);
+          setAiWarnings(data.warnings ?? []);
+          setAiMetadata(data.metadata ?? {});
+        }
+      } catch {
+        // Silent fail — user can still import raw rows
+      } finally {
+        setNormalizing(false);
+      }
     }
   }
 
@@ -332,12 +335,17 @@ function ImportInner() {
             <svg className="w-8 h-8 text-ink-muted mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            {fileName ? (
+            {normalizing ? (
+              <p className="text-sm font-medium text-navy flex items-center gap-2 justify-center">
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                Analyzing with AI…
+              </p>
+            ) : fileName ? (
               <p className="text-sm font-medium text-navy">{fileName} — {rows.length} row{rows.length !== 1 ? "s" : ""} parsed</p>
             ) : (
               <>
                 <p className="text-sm font-medium text-ink">Drop a file here or click to upload</p>
-                <p className="text-xs text-ink-muted mt-1">CSV or XLSX</p>
+                <p className="text-xs text-ink-muted mt-1">CSV or XLSX · AI normalizes columns automatically</p>
               </>
             )}
           </div>
@@ -350,21 +358,8 @@ function ImportInner() {
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide">
                   Preview — {rows.length} row{rows.length !== 1 ? "s" : ""}
-                  {aiNormalized && <span className="ml-2 text-green-600 normal-case font-normal">✓ AI normalized</span>}
+                  {aiNormalized && <span className="ml-2 text-green-600 normal-case font-normal">✦ AI normalized</span>}
                 </p>
-                {!aiNormalized && (
-                  <button
-                    onClick={normalizeWithAI}
-                    disabled={normalizing}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-stamp text-white text-xs font-semibold rounded hover:opacity-90 disabled:opacity-60"
-                  >
-                    {normalizing ? (
-                      <><svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Normalizing...</>
-                    ) : (
-                      <>✦ Normalize with AI</>
-                    )}
-                  </button>
-                )}
               </div>
 
               {Object.keys(aiMetadata).filter(k => aiMetadata[k]).length > 0 && (

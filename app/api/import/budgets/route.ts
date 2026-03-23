@@ -36,14 +36,16 @@ export async function POST(req: NextRequest) {
       const name = (row.budget_name || row.name || "General").trim();
       const fiscalYear = (row.fiscal_year || row.year || "").trim();
       const allocated = parseFloat(row.allocated || row.amount || 0);
+      const costCenter = (row.cost_center || row.costcenter || "").trim() || null;
+      const projectNumber = (row.project_number || row.project || row.pj || "").trim() || null;
 
       if (!fiscalYear) { results.errors.push(`Row ${i + 1}: Missing fiscal_year`); results.skipped++; continue; }
       if (!allocated) { results.errors.push(`Row ${i + 1}: Missing or zero allocated amount`); results.skipped++; continue; }
 
       await prisma.budget.upsert({
         where: { organizationId_fiscalYear_name: { organizationId: orgId, fiscalYear, name } },
-        update: { allocated },
-        create: { organizationId: orgId, name, fiscalYear, allocated, notes: row.notes || null },
+        update: { allocated, costCenter, projectNumber },
+        create: { organizationId: orgId, name, fiscalYear, allocated, costCenter, projectNumber, notes: row.notes || null },
       });
       results.imported++;
     } catch (err) {
