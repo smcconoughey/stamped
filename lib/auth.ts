@@ -140,12 +140,10 @@ export const authOptions: NextAuthOptions = {
 
         if (!user || !user.active) return null;
 
-        // If user has a password hash, verify it; otherwise allow any password
-        // (supports dev seed accounts and the /setup bootstrap flow)
-        if (user.password) {
-          const valid = await bcrypt.compare(credentials.password, user.password);
-          if (!valid) return null;
-        }
+        // Require a password hash — accounts without one must use SSO
+        if (!user.password) return null;
+        const valid = await bcrypt.compare(credentials.password, user.password);
+        if (!valid) return null;
 
         return {
           id: user.id,

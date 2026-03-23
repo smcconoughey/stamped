@@ -30,7 +30,7 @@ Last updated: 2026-03-12
       8. Copy: Application (client) ID, Directory (tenant) ID, client secret value
       9. Set in .env: AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET, AZURE_AD_TENANT_ID
       10. Set NEXT_PUBLIC_AZURE_AD_ENABLED=true
-- [ ] Password hashing (bcrypt) for credentials fallback
+- [x] Password hashing (bcrypt) for credentials fallback
 - [ ] Render deployment (push to GitHub → connect to Render)
 
 ### Core Features

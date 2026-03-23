@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 export default function SetupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [tenantName, setTenantName] = useState("");
   const [tenantDomain, setTenantDomain] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,7 +32,7 @@ export default function SetupPage() {
     const res = await fetch("/api/setup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, tenantName, tenantDomain }),
+      body: JSON.stringify({ name, email, password, tenantName, tenantDomain }),
     });
 
     const data = await res.json();
@@ -57,7 +58,7 @@ export default function SetupPage() {
           <h1 className="text-xl font-bold text-ink">Setup complete</h1>
           <p className="text-sm text-ink-secondary">
             Admin account created for <strong>{email}</strong>.<br/>
-            Sign in with any password — password authentication will be configured separately.
+            You can now sign in with your email and password.
           </p>
           <a
             href="/login"
@@ -116,6 +117,18 @@ export default function SetupPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 border border-border rounded-md text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-navy focus:border-navy"
                 placeholder="admin@university.edu"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-ink mb-1">Password <span className="text-stamp">*</span></label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-border rounded-md text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-navy focus:border-navy"
+                placeholder="Minimum 8 characters"
+                minLength={8}
                 required
               />
             </div>

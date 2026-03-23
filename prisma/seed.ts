@@ -1,9 +1,14 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log("Seeding database...");
+
+  // Dev seed password — all seed accounts use this
+  const DEV_PASSWORD = "password";
+  const passwordHash = await bcrypt.hash(DEV_PASSWORD, 12);
 
   // Create tenant
   const tenant = await prisma.tenant.upsert({
@@ -28,37 +33,40 @@ async function main() {
   // Create users
   const adminUser = await prisma.user.upsert({
     where: { email: "admin@coe.university.edu" },
-    update: {},
+    update: { password: passwordHash },
     create: {
       email: "admin@coe.university.edu",
       name: "Admin User",
       role: "SUPER_ADMIN",
       tenantId: tenant.id,
       active: true,
+      password: passwordHash,
     },
   });
 
   const staffUser = await prisma.user.upsert({
     where: { email: "staff@coe.university.edu" },
-    update: {},
+    update: { password: passwordHash },
     create: {
       email: "staff@coe.university.edu",
       name: "Staff Member",
       role: "ADMIN_STAFF",
       tenantId: tenant.id,
       active: true,
+      password: passwordHash,
     },
   });
 
   const studentUser = await prisma.user.upsert({
     where: { email: "student@coe.university.edu" },
-    update: {},
+    update: { password: passwordHash },
     create: {
       email: "student@coe.university.edu",
       name: "Alex Student",
       role: "STUDENT",
       tenantId: tenant.id,
       active: true,
+      password: passwordHash,
     },
   });
 
@@ -337,10 +345,10 @@ async function main() {
 
   console.log("Created purchase requests:", req1.number, req2.number, req3.number);
   console.log("\nSeed complete!");
-  console.log("\nLogin credentials:");
-  console.log("  Super Admin: admin@coe.university.edu (any password)");
-  console.log("  Admin Staff: staff@coe.university.edu (any password)");
-  console.log("  Student:     student@coe.university.edu (any password)");
+  console.log("\nLogin credentials (password: 'password'):");
+  console.log("  Super Admin: admin@coe.university.edu");
+  console.log("  Admin Staff: staff@coe.university.edu");
+  console.log("  Student:     student@coe.university.edu");
 }
 
 main()
