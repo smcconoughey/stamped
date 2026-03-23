@@ -92,6 +92,7 @@ export default function AdminQueuePage() {
   const [celebration, setCelebration] = useState(false);
   const [sortCol, setSortCol] = useState<SortCol>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [draftEmail, setDraftEmail] = useState<{ to: string; subject: string; body: string } | null>(null);
 
   useEffect(() => { if (!isAdmin && user) router.push("/"); }, [isAdmin, user]);
   useEffect(() => { fetchRequests(); }, []);
@@ -172,7 +173,7 @@ export default function AdminQueuePage() {
         body: JSON.stringify({ requestId }),
       });
       const data = await res.json();
-      if (data.mode === "draft") alert(`Draft:\nTo: ${data.to}\n\n${data.body}`);
+      if (data.mode === "draft") setDraftEmail({ to: data.to, subject: data.subject, body: data.body });
       else if (res.ok) await fetchRequests();
       else alert(data.error ?? "Failed to send email");
     } finally { setEmailingId(null); }
@@ -205,6 +206,45 @@ export default function AdminQueuePage() {
       `}</style>
 
       {celebration && <Confetti />}
+
+      {/* Draft email modal — shown when no email provider is configured */}
+      {draftEmail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-start justify-between p-5 border-b border-border">
+              <div>
+                <h2 className="text-base font-semibold text-ink">Draft Email</h2>
+                <p className="text-sm text-amber-600 mt-0.5">No email provider configured — copy and send manually, or add SMTP vars to your environment.</p>
+              </div>
+              <button onClick={() => setDraftEmail(null)} className="text-ink-muted hover:text-ink ml-4 text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-5 space-y-3 overflow-y-auto flex-1">
+              <div>
+                <span className="text-xs font-medium text-ink-muted uppercase tracking-wide">To</span>
+                <p className="text-sm text-ink mt-0.5 font-mono">{draftEmail.to}</p>
+              </div>
+              <div>
+                <span className="text-xs font-medium text-ink-muted uppercase tracking-wide">Subject</span>
+                <p className="text-sm text-ink mt-0.5">{draftEmail.subject}</p>
+              </div>
+              <div>
+                <span className="text-xs font-medium text-ink-muted uppercase tracking-wide">Body</span>
+                <pre className="text-sm text-ink mt-0.5 whitespace-pre-wrap bg-paper rounded p-3 border border-border font-sans">{draftEmail.body}</pre>
+              </div>
+            </div>
+            <div className="p-4 border-t border-border flex justify-between items-center gap-3">
+              <a href={`mailto:${draftEmail.to}?subject=${encodeURIComponent(draftEmail.subject)}&body=${encodeURIComponent(draftEmail.body)}`}
+                className="text-sm text-navy font-medium hover:underline">
+                Open in mail client
+              </a>
+              <button onClick={() => { navigator.clipboard.writeText(draftEmail.body); }}
+                className="text-sm bg-navy text-white px-4 py-2 rounded-lg hover:bg-navy/90 transition-colors">
+                Copy body
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Header title="Admin Queue" subtitle="Stamp requests through the pipeline"
         actions={

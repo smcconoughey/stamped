@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -81,7 +82,8 @@ async function getStudentDashboard(tenantId: string, userId: string) {
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
-  const user = session!.user as any;
+  if (!session?.user) redirect("/login");
+  const user = session.user as any;
   const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
 
   if (isAdmin) {
