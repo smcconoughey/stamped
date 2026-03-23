@@ -16,7 +16,7 @@ export default async function DashboardLayout({
 
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
-  if ((session.user as any).role === "PLATFORM_ADMIN") redirect("/platform");
+  if ((session.user as any).role === "PLATFORM_ADMIN") redirect("/platform/tenants");
 
   const userId = (session.user as any).id;
   const dbUser = await prisma.user.findUnique({ where: { id: userId }, select: { onboarded: true } });

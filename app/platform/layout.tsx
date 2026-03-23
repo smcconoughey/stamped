@@ -25,7 +25,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
           <span className="text-ink-secondary text-sm">/ Platform Admin</span>
         </div>
         <nav className="flex items-center gap-1 ml-4">
-          <a href="/platform" className="px-3 py-1.5 text-sm text-white/70 hover:text-white hover:bg-white/10 rounded transition-colors">
+          <a href="/platform/tenants" className="px-3 py-1.5 text-sm text-white/70 hover:text-white hover:bg-white/10 rounded transition-colors">
             Tenants
           </a>
         </nav>

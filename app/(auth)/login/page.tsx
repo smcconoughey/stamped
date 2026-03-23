@@ -33,7 +33,7 @@ function LoginForm() {
     } else {
       const session = await getSession();
       if ((session?.user as any)?.role === "PLATFORM_ADMIN") {
-        router.push("/platform");
+        router.push("/platform/tenants");
       } else {
         router.push("/");
       }
