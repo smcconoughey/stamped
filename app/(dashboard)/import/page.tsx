@@ -46,7 +46,7 @@ function downloadTemplate(tab: TabId) {
   XLSX.writeFile(wb, `stamped-${tab}-template.xlsx`);
 }
 
-function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[]; metadata: Record<string, string> }> {
+function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[]; metadata: Record<string, string>; rawGrid: string[][]; isComplex: boolean }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -58,16 +58,18 @@ function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[]; 
         // Parse as raw arrays first so we can find the real header row
         const rawRows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as string[][];
 
-        // Find the header row: first row with 2+ recognisable column keywords
+        // Find ALL header rows across the entire sheet to detect multi-table layouts
         const HEADER_KEYWORDS = ["supplier","description","qty","quantity","price","date","email","vendor","item","name","amount","cost","budget","role","organization"];
-        let headerRowIdx = 0;
-        for (let i = 0; i < Math.min(10, rawRows.length); i++) {
+        const allHeaderRows: number[] = [];
+        for (let i = 0; i < rawRows.length; i++) {
           const text = rawRows[i].map(c => String(c).toLowerCase()).join(" ");
           if (HEADER_KEYWORDS.filter(k => text.includes(k)).length >= 2) {
-            headerRowIdx = i;
-            break;
+            allHeaderRows.push(i);
           }
         }
+        const headerRowIdx = allHeaderRows[0] ?? 0;
+        // Complex = multiple tables detected, or header row is deep in the sheet (title/instructions above)
+        const isComplex = allHeaderRows.length > 1 || headerRowIdx > 5;
 
         // Extract metadata from rows above the header
         const metadata: Record<string, string> = {};
@@ -128,7 +130,10 @@ function parseFile(file: File): Promise<{ rows: Row[]; colorHints: ColorHint[]; 
           }
         }
 
-        resolve({ rows: normalized, colorHints, metadata });
+        // Pass the full raw grid so the complex parser can see everything
+        const rawGrid = rawRows.slice(0, 300).map(r => r.slice(0, 20).map(c => String(c ?? "").trim()));
+
+        resolve({ rows: normalized, colorHints, metadata, rawGrid, isComplex });
       } catch (err) {
         reject(err);
       }
@@ -154,6 +159,7 @@ function ImportInner() {
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
   const [aiMetadata, setAiMetadata] = useState<Record<string, string>>({});
   const [normalizing, setNormalizing] = useState(false);
+  const [isComplex, setIsComplex] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<ImportResults | null>(null);
@@ -183,40 +189,42 @@ function ImportInner() {
     setAiNormalized(false);
     setAiWarnings([]);
     setAiMetadata({});
+    setIsComplex(false);
     let parsed: Row[] = [];
     let hints: ColorHint[] = [];
     let metadata: Record<string, string> = {};
+    let rawGrid: string[][] = [];
+    let complex = false;
     try {
-      ({ rows: parsed, colorHints: hints, metadata } = await parseFile(file));
+      ({ rows: parsed, colorHints: hints, metadata, rawGrid, isComplex: complex } = await parseFile(file));
       setRows(parsed);
       setColorHints(hints);
       setAiMetadata(metadata);
+      setIsComplex(complex);
       setFileName(file.name);
     } catch {
       setError("Could not parse file. Make sure it's a valid CSV or XLSX.");
       return;
     }
     // Auto-normalize with AI immediately
-    if (parsed.length) {
-      setNormalizing(true);
-      try {
-        const res = await fetch("/api/import/ai-parse", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: parsed, colorHints: hints, type: tab, knownMetadata: metadata }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setRows(data.rows);
-          setAiNormalized(true);
-          setAiWarnings(data.warnings ?? []);
-          setAiMetadata(data.metadata ?? {});
-        }
-      } catch {
-        // Silent fail — user can still import raw rows
-      } finally {
-        setNormalizing(false);
+    setNormalizing(true);
+    try {
+      const res = await fetch("/api/import/ai-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: parsed, colorHints: hints, type: tab, knownMetadata: metadata, rawGrid, isComplex: complex }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRows(data.rows);
+        setAiNormalized(true);
+        setAiWarnings(data.warnings ?? []);
+        setAiMetadata(data.metadata ?? {});
       }
+    } catch {
+      // Silent fail — user can still import raw rows
+    } finally {
+      setNormalizing(false);
     }
   }
 
@@ -241,6 +249,7 @@ function ImportInner() {
     setAiNormalized(false);
     setAiWarnings([]);
     setAiMetadata({});
+    setIsComplex(false);
     setResults(null);
     setError("");
     setSelectedBudgetId("");
@@ -358,7 +367,8 @@ function ImportInner() {
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide">
                   Preview — {rows.length} row{rows.length !== 1 ? "s" : ""}
-                  {aiNormalized && <span className="ml-2 text-green-600 normal-case font-normal">✦ AI normalized</span>}
+                  {aiNormalized && !isComplex && <span className="ml-2 text-green-600 normal-case font-normal">✦ AI normalized</span>}
+                  {aiNormalized && isComplex && <span className="ml-2 text-purple-600 normal-case font-normal">✦ Multi-table sheet — AI merged {rows.length} items</span>}
                 </p>
               </div>
 

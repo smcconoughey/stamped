@@ -136,6 +136,123 @@ Respond in JSON:
   }
 }
 
+// ── Complex multi-table sheet parsing with Sonnet ────────────────────────────
+
+/**
+ * Handles sheets that can't be parsed with simple header detection:
+ * - Multiple tables on one sheet
+ * - Description tables that reference items in another table by row ID
+ * - Instruction/metadata rows intermixed with data
+ *
+ * Sends the entire raw grid as text to Sonnet and asks it to reconstruct
+ * a clean list of purchase request rows with all linked data merged.
+ */
+export async function parseComplexSheet(
+  rawGrid: string[][],
+  colorHints: Array<{ row: number; color: string }>
+): Promise<{
+  rows: Array<Record<string, string>>;
+  metadata: Record<string, string>;
+  warnings: string[];
+}> {
+  // Format the grid as a readable representation (cap at 300 rows × 20 cols)
+  const MAX_ROWS = 300;
+  const MAX_COLS = 20;
+  const gridText = rawGrid
+    .slice(0, MAX_ROWS)
+    .map((row, i) => {
+      const cells = row.slice(0, MAX_COLS).map(c => String(c ?? "").trim());
+      // Skip rows that are entirely empty
+      if (cells.every(c => !c)) return null;
+      return `R${i + 1}: ${cells.join(" | ")}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  const colorSample = colorHints.slice(0, 30).map(h => `row ${h.row}: ${h.color}`).join(", ");
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 4096,
+    messages: [{
+      role: "user",
+      content: `You are parsing a university student organization budget spreadsheet that may have multiple tables, instruction text, and linked data across sections.
+
+SPREADSHEET CONTENT (R = row number, cells separated by |):
+${gridText}
+
+${colorHints.length ? `Row background colors (useful for status): ${colorSample}` : ""}
+
+This spreadsheet may contain:
+1. A MAIN ITEMS TABLE with columns like: Row ID, Item/Description, Provider/Vendor, Quantity, Cost Per/Unit Price, Total Cost, Amount Requested
+2. A SECONDARY DESCRIPTIONS TABLE where each row has a Row ID (like A1, A2) matching the main table, plus a longer description/justification
+3. Metadata rows: organization name, total amounts, instructions (ignore instructions)
+4. Table labels like "Table 1", "Table 2", "Funding Request Information" (these are labels, not data)
+
+YOUR TASK:
+- Find all items in the main purchase table
+- For each item, find its matching description in any secondary table by matching Row IDs (A1→A1, B3→B3, etc.)
+- Merge the item data and description into one record
+- Extract metadata (org name, document title/category, total requested)
+
+Output fields for each item:
+- title: the item name/description from the main table
+- description: merged description from the secondary table (if any)
+- vendor: provider or vendor name
+- quantity: number
+- unit_price: cost per item as a decimal string (strip $ signs)
+- url: any URL found
+- notes: any other relevant info (lifespan, storage, etc.)
+
+Return ONLY valid JSON (no markdown):
+{
+  "items": [
+    {
+      "title": "Medium Nitrile Gloves",
+      "description": "PPE for handling various chemicals.",
+      "vendor": "Uline",
+      "quantity": "10",
+      "unit_price": "14.00",
+      "url": "",
+      "notes": ""
+    }
+  ],
+  "metadata": {
+    "organization": "",
+    "category": "EQUIPMENT",
+    "total_requested": ""
+  },
+  "warnings": ["any issues or assumptions made"]
+}`,
+    }],
+  });
+
+  const text = response.content.find(b => b.type === "text");
+  if (!text || text.type !== "text") {
+    return { rows: [], metadata: {}, warnings: ["AI parsing unavailable"] };
+  }
+
+  try {
+    const json = JSON.parse(text.text.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
+    const rows = (json.items ?? []).map((item: Record<string, string>) => ({
+      title: item.title ?? "",
+      description: item.description ?? "",
+      vendor: item.vendor ?? "",
+      quantity: item.quantity ?? "",
+      unit_price: item.unit_price ?? "",
+      url: item.url ?? "",
+      notes: item.notes ?? "",
+    }));
+    return {
+      rows,
+      metadata: json.metadata ?? {},
+      warnings: json.warnings ?? [],
+    };
+  } catch {
+    return { rows: [], metadata: {}, warnings: ["Could not parse AI response"] };
+  }
+}
+
 // ── Import parsing with Haiku ─────────────────────────────────────────────────
 
 const IMPORT_SCHEMAS = {

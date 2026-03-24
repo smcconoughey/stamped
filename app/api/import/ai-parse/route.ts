@@ -1,21 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { parseImportRows } from "@/lib/claude";
+import { parseImportRows, parseComplexSheet } from "@/lib/claude";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { rows, colorHints, type, knownMetadata } = await req.json();
+  const { rows, colorHints, type, knownMetadata, rawGrid, isComplex } = await req.json();
 
-  if (!rows?.length || !type) {
-    return NextResponse.json({ error: "rows and type required" }, { status: 400 });
+  if (!type) {
+    return NextResponse.json({ error: "type required" }, { status: 400 });
+  }
+
+  // ── Complex multi-table sheet → Sonnet full-sheet analysis ────────────────
+  if (isComplex && rawGrid?.length && type === "requests") {
+    const { rows: complexRows, metadata, warnings } = await parseComplexSheet(rawGrid, colorHints ?? []);
+
+    // Merge org from knownMetadata or AI-detected metadata
+    const org = knownMetadata?.organization || metadata.organization || "";
+    const mergedRows = complexRows.map(row => ({
+      ...row,
+      organization: row.organization || org,
+    }));
+
+    return NextResponse.json({
+      rows: mergedRows,
+      columnMapping: {},
+      colorStatusMapping: {},
+      statusInference: "default_draft",
+      metadata: { ...metadata, ...knownMetadata },
+      warnings: warnings.length ? warnings : [`Parsed with full-sheet AI analysis (${mergedRows.length} items found)`],
+    });
+  }
+
+  // ── Simple single-table sheet → Haiku column mapping ─────────────────────
+  if (!rows?.length) {
+    return NextResponse.json({ error: "rows required" }, { status: 400 });
   }
 
   const headers = Object.keys(rows[0] ?? {});
 
-  // Get column mapping + color→status mapping from Haiku
   const { columnMapping, colorStatusMapping, statusInference, metadata, warnings } = await parseImportRows(
     headers,
     rows,
@@ -61,8 +86,6 @@ export async function POST(req: NextRequest) {
       if (type === "requests") {
         const hasTitle = !!(row.title || row.description);
         const hasData = !!(row.total_actual || row.unit_price || row.date_ordered || row.date_received || row.vendor || row.url);
-        // Need BOTH a title (or description) AND at least one piece of financial/logistical data
-        // Pure label rows like "Shipping/handling" with only a status will be dropped
         return hasTitle && hasData;
       }
       if (type === "budgets") return !!(row.organization && row.allocated);
