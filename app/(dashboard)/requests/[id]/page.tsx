@@ -823,13 +823,21 @@ export default function RequestDetailPage() {
           )}
 
           {/* Send for Approval */}
-          {(isAdmin || isOrgLead) && request.advisorEmail && ["SUBMITTED", "PENDING_APPROVAL"].includes(request.status) && (
+          {request.advisorEmail && ["SUBMITTED", "PENDING_APPROVAL"].includes(request.status) && (
             <div className="card p-5 space-y-3">
               <h2 className="text-sm font-semibold text-ink border-b border-border pb-3">Advisor Approval Email</h2>
               <div className="text-sm text-ink-secondary">
                 <p className="font-medium text-ink">{request.advisorName || request.advisorEmail}</p>
                 <p className="text-xs text-ink-muted">{request.advisorEmail}</p>
               </div>
+              {(() => {
+                const lastSent = request.approvals
+                  .filter((a: any) => a.emailSentAt)
+                  .sort((a: any, b: any) => new Date(b.emailSentAt).getTime() - new Date(a.emailSentAt).getTime())[0];
+                return lastSent ? (
+                  <p className="text-xs text-ink-muted">Last sent {formatDate(lastSent.emailSentAt)}.</p>
+                ) : null;
+              })()}
               {emailResult?.ok && (
                 <p className="text-xs text-green-700 font-medium">Email sent successfully.</p>
               )}
@@ -839,19 +847,13 @@ export default function RequestDetailPage() {
               {emailResult?.error && !emailResult.draft && (
                 <p className="text-xs text-red-600">{emailResult.error}</p>
               )}
-              {request.approvals.some((a: any) => a.status === "PENDING" && a.emailSentAt) ? (
-                <p className="text-xs text-ink-muted">
-                  Approval email already sent on {formatDate(request.approvals.find((a: any) => a.status === "PENDING")?.emailSentAt)}.
-                </p>
-              ) : (
-                <button
-                  onClick={handleSendApprovalEmail}
-                  disabled={sendingEmail}
-                  className="w-full py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light disabled:opacity-60 transition-colors"
-                >
-                  {sendingEmail ? "Sending…" : "Send Approval Email"}
-                </button>
-              )}
+              <button
+                onClick={handleSendApprovalEmail}
+                disabled={sendingEmail}
+                className="w-full py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light disabled:opacity-60 transition-colors"
+              >
+                {sendingEmail ? "Sending…" : request.approvals.some((a: any) => a.emailSentAt) ? "Resend Approval Email" : "Send Approval Email"}
+              </button>
             </div>
           )}
 

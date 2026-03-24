@@ -32,19 +32,8 @@ export async function POST(req: NextRequest) {
 
   if (!request) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const role = (session.user as any).role;
-  if (!["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN", "ORG_LEAD"].includes(role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  // Don't re-send if already pending with a token
+  // Any authenticated user can send/resend (students, org leads, admins)
   const existingPending = request.approvals.find((a) => a.status === "PENDING");
-  if (existingPending?.emailSentAt) {
-    return NextResponse.json({
-      error: "Approval email already sent",
-      sentAt: existingPending.emailSentAt,
-    }, { status: 409 });
-  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const token = randomUUID();
