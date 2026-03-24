@@ -78,7 +78,7 @@ export function Sidebar() {
     <aside className="w-56 flex-shrink-0 flex flex-col h-screen bg-white border-r border-border">
       {/* Brand */}
       <div className="px-4 py-4 border-b border-border">
-        <img src="/fulllogo.png" alt="Stamped" className="h-12 w-auto object-contain" />
+        <img src="/fulllogo.png" alt="Stamped" className="h-14 w-auto object-contain" />
       </div>
 
       {/* Navigation */}
