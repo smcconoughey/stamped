@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { DemoBanner } from "@/components/demo-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
 
   return (
     <div className="min-h-screen bg-paper">
+      <DemoBanner />
       <header className="bg-ink border-b border-ink-secondary/20 px-6 py-3 flex items-center gap-4">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-stamp rounded flex items-center justify-center">

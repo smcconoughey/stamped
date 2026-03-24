@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { DemoBanner } from "@/components/demo-banner";
 
 type Org = { id: string; name: string; code: string; department: string | null };
 type Step = "org" | "new-org" | "staff-welcome";
@@ -68,6 +69,8 @@ export default function OnboardPage() {
   }
 
   return (
+    <>
+    <DemoBanner />
     <div className="min-h-screen bg-paper flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
 
@@ -277,6 +280,7 @@ export default function OnboardPage() {
         <p className="text-center text-xs text-ink-muted mt-6">FERPA-compliant purchasing management</p>
       </div>
     </div>
+    </>
   );
 }
 

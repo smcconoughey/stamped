@@ -4,6 +4,7 @@ import { useState, Suspense } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { DemoBanner } from "@/components/demo-banner";
 
 const azureAdEnabled = process.env.NEXT_PUBLIC_AZURE_AD_ENABLED === "true";
 
@@ -152,8 +153,11 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense>
-      <LoginForm />
-    </Suspense>
+    <>
+      <DemoBanner />
+      <Suspense>
+        <LoginForm />
+      </Suspense>
+    </>
   );
 }
