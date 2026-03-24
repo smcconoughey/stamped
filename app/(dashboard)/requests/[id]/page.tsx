@@ -637,6 +637,8 @@ export default function RequestDetailPage() {
                       <Detail label="Advisor Email" value={request.advisorEmail} />
                     </>
                   )}
+                  {request.budget?.costCenter && <Detail label="Cost Center" value={request.budget.costCenter} />}
+                  {request.budget?.projectNumber && <Detail label="Project Number" value={request.budget.projectNumber} />}
                   {request.vendorName && <Detail label="Vendor" value={request.vendorName} />}
                   {request.vendorUrl && (
                     <div>
@@ -664,6 +666,38 @@ export default function RequestDetailPage() {
               </>
             )}
           </div>
+
+          {/* Cost Center / Project Number — prominent for ordering */}
+          {request.budget && (request.budget.costCenter || request.budget.projectNumber) && (
+            <div className="card p-4 bg-amber-50 border-amber-300">
+              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-2">Purchasing Codes</p>
+              <div className="flex flex-wrap gap-6">
+                {request.budget.costCenter && (
+                  <div>
+                    <p className="text-xs text-amber-700 font-medium">Cost Center</p>
+                    <p className="text-lg font-bold text-amber-900 font-mono tracking-wide">{request.budget.costCenter}</p>
+                  </div>
+                )}
+                {request.budget.projectNumber && (
+                  <div>
+                    <p className="text-xs text-amber-700 font-medium">Project Number</p>
+                    <p className="text-lg font-bold text-amber-900 font-mono tracking-wide">{request.budget.projectNumber}</p>
+                  </div>
+                )}
+                {request.budget.name && (
+                  <div>
+                    <p className="text-xs text-amber-700 font-medium">Budget</p>
+                    <p className="text-sm font-semibold text-amber-900">{request.budget.name}{request.budget.fiscalYear ? ` (FY${request.budget.fiscalYear})` : ""}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {!request.budget && isAdmin && (
+            <div className="card p-4 border-dashed border-amber-300 bg-amber-50/50">
+              <p className="text-xs text-amber-700">No budget assigned — cost center and project number will appear here once a budget is linked.</p>
+            </div>
+          )}
 
           {/* Line Items */}
           <div className="card p-0 overflow-hidden">

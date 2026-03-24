@@ -29,6 +29,7 @@ export async function GET(
       },
       emailThreads: { orderBy: { createdAt: "desc" } },
       attachments: true,
+      budget: { select: { id: true, name: true, costCenter: true, projectNumber: true, fiscalYear: true } },
     },
   });
 
