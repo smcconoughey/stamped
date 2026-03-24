@@ -102,6 +102,54 @@ To enable the Microsoft SSO button on the login page, set `NEXT_PUBLIC_AZURE_AD_
 
 ---
 
+## Demo Mode
+
+A read-only demo mode lets you walk through every UI flow (login, onboarding, request creation, org setup) against the live database **without writing any data**.
+
+| Action | URL |
+|--------|-----|
+| **Enable** | `/api/demo` or `/api/demo?on=true` |
+| **Disable** | `/api/demo?on=false` or click "Exit Demo" on the banner |
+
+When active:
+- An amber banner appears on every page: *"Demo Mode — All actions are simulated. No data is being saved."*
+- All POST/PATCH/PUT/DELETE requests to `/api/*` are intercepted by middleware and return mock success responses — no database writes occur
+- GET requests pass through normally so you see real data
+- Auth routes (`/api/auth/*`) are excluded so login/logout still work
+- The onboarded-check redirect is bypassed so you can access the dashboard with un-onboarded test accounts
+
+The demo cookie expires after 24 hours.
+
+---
+
+## Security
+
+### Rate Limiting
+
+Login attempts (`POST /api/auth/callback/credentials`) are rate-limited to **10 attempts per IP per 15-minute window**. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header. The limiter uses an in-memory sliding window — suitable for single-instance deployments on Render. For multi-instance, swap in Upstash or Redis.
+
+### Security Headers
+
+All responses include the following headers (configured in `next.config.mjs`):
+
+| Header | Value |
+|--------|-------|
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; ...` |
+
+The `X-Powered-By` header is suppressed (`poweredByHeader: false`).
+
+### Other Hardening
+
+- **Health endpoint** (`/api/health`) returns only `{ "status": "ok" }` — no component-level detail.
+- **robots.txt** disallows crawling of `/api/`, `/platform/`, `/admin/`, `/onboard`, and `/setup`.
+
+---
+
 ## Tech Stack
 
 - **Next.js 14** (App Router) + **TypeScript**

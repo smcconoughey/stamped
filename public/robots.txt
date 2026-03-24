@@ -1,0 +1,10 @@
+User-agent: *
+Disallow: /api/
+Disallow: /platform/
+Disallow: /admin/
+Disallow: /onboard
+Disallow: /setup
+
+Allow: /api/health
+
+Sitemap: https://stamped-oisg.onrender.com/sitemap.xml

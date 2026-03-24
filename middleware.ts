@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rate-limit";
 
 const DEMO_COOKIE = "stamped-demo";
 
-/**
- * Returns a plausible mock response for write endpoints so the UI
- * behaves normally without persisting anything.
- */
+// ── Rate-limit config ────────────────────────────────────────────────────────
+// 10 login attempts per IP per 15-minute window
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+function getClientIp(req: NextRequest): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    req.ip ||
+    "unknown"
+  );
+}
+
+// ── Demo-mode mock responses ─────────────────────────────────────────────────
+
 function mockResponse(pathname: string, method: string): Record<string, unknown> {
   const ts = Date.now().toString(36);
 
@@ -31,7 +44,6 @@ function mockResponse(pathname: string, method: string): Record<string, unknown>
     return { ok: true, demo: true };
   }
   if (pathname === "/api/import" || pathname.match(/^\/api\/import\//)) {
-    // Let AI parse (read-only) through; block actual imports
     if (pathname === "/api/import/ai-parse") return { rows: [], metadata: {}, warnings: ["Demo mode — nothing imported"], demo: true };
     return { ok: true, imported: 0, demo: true };
   }
@@ -51,18 +63,40 @@ function mockResponse(pathname: string, method: string): Record<string, unknown>
     return { ok: true, demo: true };
   }
 
-  // Catch-all for any other write
   return { ok: true, demo: true };
 }
 
-export function middleware(request: NextRequest) {
-  const isDemoMode = request.cookies.get(DEMO_COOKIE)?.value === "true";
-  if (!isDemoMode) return NextResponse.next();
+// ── Middleware ────────────────────────────────────────────────────────────────
 
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const method = request.method;
 
-  // Only intercept API write methods
+  // ── Rate-limit login attempts ──────────────────────────────────────────
+  if (pathname === "/api/auth/callback/credentials" && method === "POST") {
+    const ip = getClientIp(request);
+    const result = rateLimit(`login:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS);
+
+    if (!result.allowed) {
+      const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
+      return NextResponse.json(
+        { error: "Too many login attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfterSec),
+            "X-RateLimit-Limit": String(LOGIN_LIMIT),
+            "X-RateLimit-Remaining": "0",
+          },
+        },
+      );
+    }
+  }
+
+  // ── Demo mode ──────────────────────────────────────────────────────────
+  const isDemoMode = request.cookies.get(DEMO_COOKIE)?.value === "true";
+  if (!isDemoMode) return NextResponse.next();
+
   if (!pathname.startsWith("/api/")) return NextResponse.next();
 
   // Never intercept auth or demo-toggle routes
@@ -70,10 +104,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow GET/HEAD through — reads are fine
+  // Allow reads through
   if (method === "GET" || method === "HEAD") return NextResponse.next();
 
-  // Block the write and return a mock success
+  // Block write and return mock success
   return NextResponse.json(mockResponse(pathname, method), {
     status: 200,
     headers: { "x-demo-mode": "true" },
