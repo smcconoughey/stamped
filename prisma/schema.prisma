@@ -108,10 +108,12 @@ model Organization {
   code       String
   tenantId   String
   tenant     Tenant   @relation(fields: [tenantId], references: [id])
-  department String?
-  costCenter String?
-  active     Boolean  @default(true)
-  notes      String?
+  department    String?
+  costCenter    String?
+  active        Boolean  @default(true)
+  notes         String?
+  advisorName   String?
+  advisorEmail  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   const userId = (session.user as any).id;
   const tenantId = (session.user as any).tenantId;
-  const { role, orgId, orgName, orgCode, orgDepartment } = await req.json();
+  const { role, orgId, orgName, orgCode, orgDepartment, orgAdvisorName, orgAdvisorEmail } = await req.json();
 
   const allowedRoles = ["STUDENT", "ORG_LEAD", "ADVISOR", "ADMIN_STAFF", "FINANCE_ADMIN"];
   if (!allowedRoles.includes(role)) {
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
         name: orgName,
         code: orgCode.toUpperCase(),
         department: orgDepartment || null,
+        advisorName: orgAdvisorName || null,
+        advisorEmail: orgAdvisorEmail || null,
         tenantId,
         active: true,
       },

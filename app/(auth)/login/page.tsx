@@ -3,6 +3,7 @@
 import { useState, Suspense } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 const azureAdEnabled = process.env.NEXT_PUBLIC_AZURE_AD_ENABLED === "true";
 
@@ -49,18 +50,8 @@ function LoginForm() {
     <div className="min-h-screen bg-paper flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-navy rounded-xl mb-4">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <rect x="4" y="4" width="20" height="24" rx="2" fill="none" stroke="white" strokeWidth="1.5"/>
-              <rect x="9" y="2" width="10" height="5" rx="1" fill="white"/>
-              <line x1="8" y1="12" x2="20" y2="12" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-              <line x1="8" y1="16" x2="20" y2="16" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-              <line x1="8" y1="20" x2="14" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-ink">Stamped</h1>
-          <p className="text-ink-secondary mt-1">Purchasing Management Portal</p>
+        <div className="flex justify-center mb-8">
+          <Image src="/fulllogo.png" alt="Stamped" width={200} height={67} style={{ objectFit: "contain" }} priority />
         </div>
 
         <div className="bg-white border border-border rounded-lg shadow-card p-8">

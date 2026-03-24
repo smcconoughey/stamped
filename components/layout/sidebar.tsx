@@ -77,19 +77,8 @@ export function Sidebar() {
   return (
     <aside className="w-56 flex-shrink-0 flex flex-col h-screen bg-white border-r border-border">
       {/* Brand */}
-      <div className="px-4 py-5 border-b border-border">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-navy rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="2" y="2" width="12" height="14" rx="1" fill="none" stroke="white" strokeWidth="1.2"/>
-              <rect x="5" y="1" width="6" height="3" rx="0.5" fill="white"/>
-              <line x1="4" y1="7" x2="12" y2="7" stroke="white" strokeWidth="1" strokeLinecap="round"/>
-              <line x1="4" y1="9.5" x2="12" y2="9.5" stroke="white" strokeWidth="1" strokeLinecap="round"/>
-              <line x1="4" y1="12" x2="8" y2="12" stroke="white" strokeWidth="1" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <span className="font-bold text-ink text-base tracking-tight">Stamped</span>
-        </div>
+      <div className="px-4 py-4 border-b border-border">
+        <img src="/fulllogo.png" alt="Stamped" className="h-8 w-auto object-contain" />
       </div>
 
       {/* Navigation */}
