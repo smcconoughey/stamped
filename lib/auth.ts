@@ -106,15 +106,30 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
-    // Credentials — platform admin + tenant users
+    // Credentials — platform admin + tenant users + demo
     CredentialsProvider({
       name: "Email",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        demo: { label: "Demo", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
+
+        // ── Demo mode — accept any credentials, return a fake session ──
+        if (credentials.demo === "true") {
+          // Find the first tenant so the demo user can see real org data
+          const tenant = await prisma.tenant.findFirst();
+          return {
+            id: "demo-user",
+            email: credentials.email,
+            name: credentials.email.split("@")[0],
+            role: "STUDENT",
+            tenantId: tenant?.id ?? null,
+            onboarded: false,
+          } as any;
+        }
 
         // ── Platform admin check (hardcoded, env-based) ──
         if (

@@ -8,15 +8,21 @@ import { DemoBanner } from "@/components/demo-banner";
 
 const azureAdEnabled = process.env.NEXT_PUBLIC_AZURE_AD_ENABLED === "true";
 
+function isDemoMode() {
+  return document.cookie.split("; ").some((c) => c === "stamped-demo=true");
+}
+
 function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackError = searchParams.get("error");
+  const demo = typeof window !== "undefined" && isDemoMode();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,6 +32,7 @@ function LoginForm() {
     const result = await signIn("credentials", {
       email,
       password,
+      demo: demo ? "true" : undefined,
       redirect: false,
     });
 
@@ -94,6 +101,47 @@ function LoginForm() {
                 </div>
                 <div className="relative flex justify-center text-xs">
                   <span className="bg-white px-3 text-ink-muted">or sign in with email</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Demo quick-login — shown when demo cookie is set */}
+          {demo && (
+            <>
+              <div className="mb-5 px-4 py-3 bg-amber-50 border border-amber-200 rounded-md">
+                <p className="text-sm font-medium text-amber-800 mb-2">Demo Mode Active</p>
+                <p className="text-xs text-amber-700 mb-3">Sign in with any email and password to test the setup flow. Nothing will be saved.</p>
+                <button
+                  onClick={async () => {
+                    setDemoLoading(true);
+                    setError("");
+                    const result = await signIn("credentials", {
+                      email: "demo@example.edu",
+                      password: "demo",
+                      demo: "true",
+                      redirect: false,
+                    });
+                    if (result?.error) {
+                      setError("Demo login failed.");
+                      setDemoLoading(false);
+                    } else {
+                      router.push("/onboard");
+                    }
+                  }}
+                  disabled={demoLoading}
+                  className="w-full flex items-center justify-center px-4 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-md hover:bg-amber-700 transition-colors disabled:opacity-60"
+                >
+                  {demoLoading ? "Signing in..." : "Quick Demo Sign In"}
+                </button>
+              </div>
+
+              <div className="relative mb-5">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border"/>
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-white px-3 text-ink-muted">or sign in with real credentials</span>
                 </div>
               </div>
             </>

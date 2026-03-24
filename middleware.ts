@@ -104,7 +104,18 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow reads through
+  // In demo mode, mock specific GET routes that would fail for the fake user
+  if (method === "GET" && pathname === "/api/onboard") {
+    return NextResponse.json({
+      orgs: [
+        { id: "demo-org-1", name: "Experimental Rocket Propulsion Lab", code: "ERPL", department: "College of Engineering" },
+        { id: "demo-org-2", name: "Robotics Club", code: "ROBO", department: "College of Engineering" },
+        { id: "demo-org-3", name: "Student Government Association", code: "SGA", department: null },
+      ],
+    });
+  }
+
+  // Allow other reads through
   if (method === "GET" || method === "HEAD") return NextResponse.next();
 
   // Block write and return mock success

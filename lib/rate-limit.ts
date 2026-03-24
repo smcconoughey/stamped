@@ -15,11 +15,11 @@ const store = new Map<string, Entry>();
 const CLEANUP_INTERVAL = 5 * 60 * 1000;
 setInterval(() => {
   const now = Date.now();
-  for (const [key, entry] of store) {
+  store.forEach((entry, key) => {
     if (entry.timestamps.length === 0 || entry.timestamps[entry.timestamps.length - 1] < now - 15 * 60 * 1000) {
       store.delete(key);
     }
-  }
+  });
 }, CLEANUP_INTERVAL);
 
 export interface RateLimitResult {
