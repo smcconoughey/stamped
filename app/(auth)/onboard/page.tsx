@@ -277,7 +277,6 @@ export default function OnboardPage() {
           )}
         </div>
 
-        <p className="text-center text-xs text-ink-muted mt-6">FERPA-compliant purchasing management</p>
       </div>
     </div>
     </>
