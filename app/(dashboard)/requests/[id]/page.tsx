@@ -293,6 +293,11 @@ export default function RequestDetailPage() {
 
   async function handleStamp(targetStatus: string) {
     if (stamping) return;
+    // "Send for Approval" stamp should send the email, not just flip status
+    if (targetStatus === "PENDING_APPROVAL") {
+      await handleSendApprovalEmail();
+      return;
+    }
     setStamping(true);
     // Let the press animation run for ~200ms before the network call
     await new Promise(r => setTimeout(r, 180));
@@ -445,12 +450,20 @@ export default function RequestDetailPage() {
 
   const currentFlowIndex = STATUS_FLOW.indexOf(request.status as RequestStatus);
   const ALL_STATUSES = ["DRAFT","SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP","PICKED_UP","CANCELLED"];
-  const nextOptions = (isAdmin || isOrgLead)
+
+  // Non-admins cannot directly approve/skip the approval phase
+  const needsApprovalPhase = ["SUBMITTED","PENDING_APPROVAL"].includes(request.status);
+  const nextOptions = isAdmin
     ? ALL_STATUSES.filter(s => s !== request.status)
+    : isOrgLead
+    ? ALL_STATUSES.filter(s => s !== request.status && !(needsApprovalPhase && s === "APPROVED"))
     : NEXT_STATUS_OPTIONS[request.status] || [];
 
   const canDelete = isAdmin || (["DRAFT","SUBMITTED","CANCELLED"].includes(request.status) && (user?.role === "ORG_LEAD" || request.submittedById === user?.id));
-  const primaryNext = PRIMARY_NEXT[request.status];
+  // For non-admins in approval phase, primary action is "Send for Approval", not direct approve
+  const primaryNext = (!isAdmin && needsApprovalPhase)
+    ? "PENDING_APPROVAL"
+    : PRIMARY_NEXT[request.status];
   const canEdit = isAdmin || (request.submittedById === user?.id && !["CANCELLED","PICKED_UP"].includes(request.status));
 
   return (

@@ -35,7 +35,13 @@ export async function POST(req: NextRequest) {
   // Any authenticated user can send/resend (students, org leads, admins)
   const existingPending = request.approvals.find((a) => a.status === "PENDING");
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Derive app URL from request host so approve/decline links work even if
+  // NEXT_PUBLIC_APP_URL isn't set or is set to a bare hostname without protocol.
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  const host = req.headers.get("host") ?? "localhost:3000";
+  const proto = host.startsWith("localhost") ? "http" : "https";
+  const appUrl = configured?.startsWith("http") ? configured : `${proto}://${host}`;
+
   const token = randomUUID();
   const approveUrl = `${appUrl}/api/email/decision?token=${token}&action=approve`;
   const declineUrl = `${appUrl}/api/email/decision?token=${token}&action=decline`;
