@@ -421,7 +421,7 @@ function EditableGrid({
           <button onClick={applyBulk} className="px-3 py-1 bg-navy text-white text-xs font-semibold rounded hover:bg-navy-light transition-colors">
             Apply to {selected.size}
           </button>
-          <button onClick={() => { onDeleteRows([...selected]); setSelected(new Set()); }} className="px-3 py-1 border border-red-300 text-red-600 text-xs font-semibold rounded hover:bg-red-50 transition-colors">
+          <button onClick={() => { onDeleteRows(Array.from(selected)); setSelected(new Set()); }} className="px-3 py-1 border border-red-300 text-red-600 text-xs font-semibold rounded hover:bg-red-50 transition-colors">
             Delete selected
           </button>
           <button onClick={() => setSelected(new Set())} className="text-xs text-ink-muted hover:text-ink ml-auto">
