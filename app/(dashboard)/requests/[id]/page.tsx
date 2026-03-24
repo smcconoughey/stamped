@@ -823,7 +823,7 @@ export default function RequestDetailPage() {
           )}
 
           {/* Send for Approval */}
-          {isAdmin && request.advisorEmail && ["SUBMITTED", "PENDING_APPROVAL"].includes(request.status) && (
+          {(isAdmin || isOrgLead) && request.advisorEmail && ["SUBMITTED", "PENDING_APPROVAL"].includes(request.status) && (
             <div className="card p-5 space-y-3">
               <h2 className="text-sm font-semibold text-ink border-b border-border pb-3">Advisor Approval Email</h2>
               <div className="text-sm text-ink-secondary">

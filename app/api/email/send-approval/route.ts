@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   if (!request) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const role = (session.user as any).role;
-  if (!["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(role)) {
+  if (!["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN", "ORG_LEAD"].includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
