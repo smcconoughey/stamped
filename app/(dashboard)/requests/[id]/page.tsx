@@ -268,6 +268,8 @@ export default function RequestDetailPage() {
   const [lastStampedStatus, setLastStampedStatus] = useState<string | null>(null);
   const [celebration, setCelebration] = useState(false);
   const [badgePop, setBadgePop] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailResult, setEmailResult] = useState<{ ok?: boolean; error?: string; draft?: boolean } | null>(null);
 
   // Edit form state
   const [editMode, setEditMode] = useState(false);
@@ -347,6 +349,31 @@ export default function RequestDetailPage() {
       await fetch(`/api/requests/${id}/status`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "SUBMITTED" }) });
       await fetchRequest();
     } finally { setUpdatingStatus(false); }
+  }
+
+  async function handleSendApprovalEmail() {
+    setSendingEmail(true);
+    setEmailResult(null);
+    try {
+      const res = await fetch("/api/email/send-approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEmailResult({ error: data.error || "Failed to send" });
+      } else if (data.mode === "draft") {
+        setEmailResult({ draft: true, error: data.note });
+      } else {
+        setEmailResult({ ok: true });
+        await fetchRequest();
+      }
+    } catch (e: any) {
+      setEmailResult({ error: e.message });
+    } finally {
+      setSendingEmail(false);
+    }
   }
 
   async function handleDelete() {
@@ -792,6 +819,39 @@ export default function RequestDetailPage() {
               <Button variant="secondary" size="sm" className="w-full" onClick={handleSaveAdminNotes} disabled={savingNotes}>
                 {savingNotes ? "Saving…" : "Save Notes"}
               </Button>
+            </div>
+          )}
+
+          {/* Send for Approval */}
+          {isAdmin && request.advisorEmail && ["SUBMITTED", "PENDING_APPROVAL"].includes(request.status) && (
+            <div className="card p-5 space-y-3">
+              <h2 className="text-sm font-semibold text-ink border-b border-border pb-3">Advisor Approval Email</h2>
+              <div className="text-sm text-ink-secondary">
+                <p className="font-medium text-ink">{request.advisorName || request.advisorEmail}</p>
+                <p className="text-xs text-ink-muted">{request.advisorEmail}</p>
+              </div>
+              {emailResult?.ok && (
+                <p className="text-xs text-green-700 font-medium">Email sent successfully.</p>
+              )}
+              {emailResult?.draft && (
+                <p className="text-xs text-amber-700">No email provider configured — set SMTP or Graph env vars on Render.</p>
+              )}
+              {emailResult?.error && !emailResult.draft && (
+                <p className="text-xs text-red-600">{emailResult.error}</p>
+              )}
+              {request.approvals.some((a: any) => a.status === "PENDING" && a.emailSentAt) ? (
+                <p className="text-xs text-ink-muted">
+                  Approval email already sent on {formatDate(request.approvals.find((a: any) => a.status === "PENDING")?.emailSentAt)}.
+                </p>
+              ) : (
+                <button
+                  onClick={handleSendApprovalEmail}
+                  disabled={sendingEmail}
+                  className="w-full py-2 bg-navy text-white text-sm font-semibold rounded-md hover:bg-navy-light disabled:opacity-60 transition-colors"
+                >
+                  {sendingEmail ? "Sending…" : "Send Approval Email"}
+                </button>
+              )}
             </div>
           )}
 
