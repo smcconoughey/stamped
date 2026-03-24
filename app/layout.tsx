@@ -8,6 +8,10 @@ export const metadata: Metadata = {
     template: "%s | Stamped",
   },
   description: "University Purchasing Management",
+  icons: {
+    icon: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
