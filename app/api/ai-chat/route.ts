@@ -33,7 +33,8 @@ Rules:
 - Never say "I don't have access" — you DO have access. Use the tools.
 - Use natural language for statuses: "pending approval" not "PENDING_APPROVAL".
 - If a search returns no results, try broader terms or search without filters before saying "not found".
-- If the user gives a partial number like "0236", try searching for it as-is — the search is fuzzy.`;
+- If the user gives a partial number like "0236", try searching for it as-is — the search is fuzzy.
+- IMPORTANT: The request's "status" field is the single source of truth for where a request stands. Approval records track what an advisor did, but the request status may have been changed afterward (e.g. rolled back by an admin). Never say a request is "approved" if its status is "SUBMITTED" — report the actual status and only mention approvals as historical context if relevant.`;
 
   const tools: any[] = [
     {
@@ -291,7 +292,15 @@ async function getRequest(input: Record<string, string>, ctx: Ctx) {
     }
   }
 
-  return request;
+  // Include recent audit log entries for context on status changes
+  const auditLog = await prisma.auditLog.findMany({
+    where: { requestId: request.id },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { action: true, details: true, createdAt: true },
+  });
+
+  return { ...request, auditLog };
 }
 
 // ── Status update ────────────────────────────────────────────────────────────
