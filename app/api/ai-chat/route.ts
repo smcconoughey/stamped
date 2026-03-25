@@ -3,9 +3,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { anthropic } from "@/lib/claude";
 import { prisma } from "@/lib/prisma";
+import { sendEmail } from "@/lib/mailer";
 import { randomUUID } from "crypto";
+import { withTelemetry, trackAiCall } from "@/lib/telemetry";
 
-export async function POST(req: NextRequest) {
+export const POST = withTelemetry(async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -29,16 +31,18 @@ Rules:
 - Use the tools to look up real data before answering questions about requests, budgets, or orgs.
 - When the user asks to do something (resend email, change status), just do it and confirm briefly.
 - Never say "I don't have access" — you DO have access. Use the tools.
-- Use natural language for statuses: "pending approval" not "PENDING_APPROVAL".`;
+- Use natural language for statuses: "pending approval" not "PENDING_APPROVAL".
+- If a search returns no results, try broader terms or search without filters before saying "not found".
+- If the user gives a partial number like "0236", try searching for it as-is — the search is fuzzy.`;
 
   const tools: any[] = [
     {
       name: "search_requests",
-      description: "Search purchase requests. Returns up to 10 results. Use to find requests by keyword, status, vendor, etc.",
+      description: "Search purchase requests. Case-insensitive fuzzy search by keyword, vendor, title, number, or description. Returns up to 20 results.",
       input_schema: {
         type: "object" as const,
         properties: {
-          query: { type: "string", description: "Search term — matches title, number, vendor name, or description" },
+          query: { type: "string", description: "Search term — matches title, number, vendor name, or description (case-insensitive)" },
           status: { type: "string", description: "Filter by status: DRAFT, SUBMITTED, PENDING_APPROVAL, APPROVED, ORDERED, RECEIVED, READY_FOR_PICKUP, PICKED_UP, CANCELLED, REJECTED, ON_HOLD" },
         },
         required: [],
@@ -46,11 +50,11 @@ Rules:
     },
     {
       name: "get_request",
-      description: "Get full details of a specific purchase request by ID or request number.",
+      description: "Get full details of a specific purchase request by ID or request number (e.g. ERPL-2026-001).",
       input_schema: {
         type: "object" as const,
         properties: {
-          id: { type: "string", description: "Request ID (cuid) or request number (e.g. ERPL-2026-001)" },
+          id: { type: "string", description: "Request ID (cuid) or request number" },
         },
         required: ["id"],
       },
@@ -70,7 +74,7 @@ Rules:
     },
     {
       name: "send_approval_email",
-      description: "Send or resend an advisor approval email for a purchase request.",
+      description: "Send or resend an advisor approval email for a purchase request. Returns whether the email was actually delivered.",
       input_schema: {
         type: "object" as const,
         properties: {
@@ -101,36 +105,31 @@ Rules:
     },
   ];
 
-  // Build Claude messages
   const claudeMessages: any[] = messages.map((m: { role: string; content: string }) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
   }));
 
-  // Tool execution loop (max 5 iterations)
   let finalText = "Sorry, something went wrong.";
   for (let i = 0; i < 5; i++) {
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      system: systemPrompt,
-      tools,
-      messages: claudeMessages,
-    });
+    const response = await trackAiCall(
+      () => anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        system: systemPrompt,
+        tools,
+        messages: claudeMessages,
+      }),
+      "claude-haiku-4-5-20251001",
+      "ai-chat"
+    );
 
-    // Collect any text
     const textBlock = response.content.find((b: any) => b.type === "text");
-    if (textBlock?.type === "text") {
-      finalText = textBlock.text;
-    }
+    if (textBlock?.type === "text") finalText = textBlock.text;
 
-    // If no tool use, we're done
     const toolUses = response.content.filter((b: any) => b.type === "tool_use");
-    if (toolUses.length === 0) {
-      break;
-    }
+    if (toolUses.length === 0) break;
 
-    // Execute tools and add results
     claudeMessages.push({ role: "assistant", content: response.content });
 
     const toolResults: any[] = [];
@@ -143,14 +142,13 @@ Rules:
       });
       toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
     }
-
     claudeMessages.push({ role: "user", content: toolResults });
   }
 
   return NextResponse.json({ reply: finalText });
-}
+});
 
-// ── Tool implementations ────────────────────────────────────────────────────
+// ── Tool dispatch ────────────────────────────────────────────────────────────
 
 interface Ctx {
   userId: string;
@@ -163,23 +161,23 @@ interface Ctx {
 }
 
 async function executeTool(name: string, input: Record<string, string>, ctx: Ctx): Promise<unknown> {
-  switch (name) {
-    case "search_requests":
-      return searchRequests(input, ctx);
-    case "get_request":
-      return getRequest(input, ctx);
-    case "update_request_status":
-      return updateRequestStatus(input, ctx);
-    case "send_approval_email":
-      return sendApprovalEmail(input, ctx);
-    case "list_organizations":
-      return listOrganizations(ctx);
-    case "get_budgets":
-      return getBudgets(input, ctx);
-    default:
-      return { error: "Unknown tool" };
+  try {
+    switch (name) {
+      case "search_requests": return await searchRequests(input, ctx);
+      case "get_request": return await getRequest(input, ctx);
+      case "update_request_status": return await updateRequestStatus(input, ctx);
+      case "send_approval_email": return await sendApprovalEmailTool(input, ctx);
+      case "list_organizations": return await listOrganizations(ctx);
+      case "get_budgets": return await getBudgets(input, ctx);
+      default: return { error: "Unknown tool" };
+    }
+  } catch (err: any) {
+    console.error(`[ai-chat] tool ${name} error:`, err);
+    return { error: `Tool failed: ${err.message}` };
   }
 }
+
+// ── Search — case-insensitive by fetching broadly and filtering in JS ────────
 
 async function searchRequests(input: Record<string, string>, ctx: Ctx) {
   const where: any = {};
@@ -196,24 +194,16 @@ async function searchRequests(input: Record<string, string>, ctx: Ctx) {
       where.submittedById = ctx.userId;
     }
   } else {
-    // Admin scoped to tenant
     where.organization = { tenantId: ctx.tenantId };
   }
 
   if (input.status) where.status = input.status;
-  if (input.query) {
-    where.OR = [
-      { title: { contains: input.query } },
-      { number: { contains: input.query } },
-      { vendorName: { contains: input.query } },
-      { description: { contains: input.query } },
-    ];
-  }
 
+  // Fetch a broader set then filter case-insensitively in JS
   const requests = await prisma.purchaseRequest.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    take: 10,
+    take: input.query ? 200 : 20, // fetch more when searching to filter in JS
     select: {
       id: true, number: true, title: true, status: true, priority: true,
       vendorName: true, totalEstimated: true, neededBy: true,
@@ -225,15 +215,31 @@ async function searchRequests(input: Record<string, string>, ctx: Ctx) {
     },
   });
 
-  return { count: requests.length, requests };
+  if (!input.query) {
+    return { count: requests.length, requests: requests.slice(0, 20) };
+  }
+
+  // Case-insensitive JS filter
+  const q = input.query.toLowerCase();
+  const filtered = requests.filter((r) =>
+    (r.title && r.title.toLowerCase().includes(q)) ||
+    (r.number && r.number.toLowerCase().includes(q)) ||
+    (r.vendorName && r.vendorName.toLowerCase().includes(q)) ||
+    (r.organization?.name && r.organization.name.toLowerCase().includes(q)) ||
+    (r.organization?.code && r.organization.code.toLowerCase().includes(q))
+  );
+
+  return { count: filtered.length, requests: filtered.slice(0, 20) };
 }
+
+// ── Get request by ID or number (case-insensitive number match) ──────────────
 
 async function getRequest(input: Record<string, string>, ctx: Ctx) {
   const id = input.id;
-  const request = await prisma.purchaseRequest.findFirst({
-    where: {
-      OR: [{ id }, { number: id }],
-    },
+
+  // Try exact ID first
+  let request = await prisma.purchaseRequest.findFirst({
+    where: { OR: [{ id }, { number: id }] },
     include: {
       organization: { select: { name: true, code: true } },
       submittedBy: { select: { name: true, email: true } },
@@ -243,6 +249,33 @@ async function getRequest(input: Record<string, string>, ctx: Ctx) {
       approvals: { select: { status: true, approverEmail: true, emailSentAt: true, responseReceivedAt: true } },
     },
   });
+
+  // If not found and input looks like a partial number, try fuzzy
+  if (!request && /^\d+$/.test(id)) {
+    const allRequests = await prisma.purchaseRequest.findMany({
+      where: ctx.isAdmin
+        ? { organization: { tenantId: ctx.tenantId } }
+        : ctx.isOrgLead
+        ? {}
+        : { submittedById: ctx.userId },
+      select: { id: true, number: true },
+      take: 500,
+    });
+    const match = allRequests.find((r) => r.number.includes(id));
+    if (match) {
+      request = await prisma.purchaseRequest.findUnique({
+        where: { id: match.id },
+        include: {
+          organization: { select: { name: true, code: true } },
+          submittedBy: { select: { name: true, email: true } },
+          assignedTo: { select: { name: true, email: true } },
+          budget: { select: { name: true, costCenter: true, projectNumber: true, fiscalYear: true, allocated: true, spent: true } },
+          items: true,
+          approvals: { select: { status: true, approverEmail: true, emailSentAt: true, responseReceivedAt: true } },
+        },
+      });
+    }
+  }
 
   if (!request) return { error: "Request not found" };
 
@@ -261,11 +294,12 @@ async function getRequest(input: Record<string, string>, ctx: Ctx) {
   return request;
 }
 
+// ── Status update ────────────────────────────────────────────────────────────
+
 async function updateRequestStatus(input: Record<string, string>, ctx: Ctx) {
   const request = await prisma.purchaseRequest.findUnique({ where: { id: input.requestId } });
   if (!request) return { error: "Request not found" };
 
-  // Non-admins can't force approve during approval phase
   if (!ctx.isAdmin && ["SUBMITTED", "PENDING_APPROVAL"].includes(request.status) && input.status === "APPROVED") {
     return { error: "Only admins can manually approve. Use send_approval_email to request advisor approval." };
   }
@@ -287,20 +321,63 @@ async function updateRequestStatus(input: Record<string, string>, ctx: Ctx) {
   return { ok: true, previousStatus: request.status, newStatus: input.status };
 }
 
-async function sendApprovalEmail(input: Record<string, string>, ctx: Ctx) {
-  const requestId = input.requestId;
+// ── Send approval email ──────────────────────────────────────────────────────
+
+async function sendApprovalEmailTool(input: Record<string, string>, ctx: Ctx) {
   const request = await prisma.purchaseRequest.findUnique({
-    where: { id: requestId },
-    include: { approvals: true, organization: true, items: true },
+    where: { id: input.requestId },
+    include: { approvals: true, organization: true, items: true, submittedBy: true },
   });
 
   if (!request) return { error: "Request not found" };
-  if (!request.advisorEmail) return { error: "No advisor email on this request" };
+  if (!request.advisorEmail) return { error: "No advisor email on this request — add one first." };
 
-  // Find or create pending approval
   const existingPending = request.approvals.find((a) => a.status === "PENDING");
   const token = randomUUID();
 
+  // Build the email first, only persist token after successful send
+  const appUrl = `${ctx.proto}://${ctx.host}`;
+  const approveUrl = `${appUrl}/api/email/decision?token=${token}&action=approve`;
+  const declineUrl = `${appUrl}/api/email/decision?token=${token}&action=decline`;
+  const advisorName = request.advisorName || request.advisorEmail;
+  const studentName = request.submittedBy?.name || request.submittedBy?.email || "a student";
+  const total = request.totalEstimated ? `$${request.totalEstimated.toFixed(2)}` : "TBD";
+
+  const itemRows = request.items.map((i) => {
+    const price = i.unitPrice != null ? `$${i.unitPrice.toFixed(2)}` : "—";
+    const lineTotal = i.unitPrice != null ? `$${(i.unitPrice * i.quantity).toFixed(2)}` : "—";
+    return `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb">${i.name}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:center">${i.quantity}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${price}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${lineTotal}</td></tr>`;
+  }).join("");
+
+  const bodyHtml = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 16px"><tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)">
+<tr><td style="background:#1e3a5f;padding:24px 32px"><p style="margin:0;color:#fff;font-size:20px;font-weight:700">Stamped</p><p style="margin:4px 0 0;color:#93c5fd;font-size:13px">Purchase Request Approval</p></td></tr>
+<tr><td style="padding:32px">
+<p style="margin:0 0 20px;font-size:15px;color:#374151">Dear ${advisorName},</p>
+<p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.6"><strong>${studentName}</strong> has submitted a purchase request on behalf of <strong>${request.organization?.name}</strong> that requires your approval.</p>
+<table width="100%" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:24px"><tr><td style="padding:16px 20px"><p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Request</p><p style="margin:4px 0 0;font-size:15px;color:#111827;font-weight:600">${request.number} — ${request.title}</p></td></tr><tr><td style="padding:12px 20px"><p style="margin:0;font-size:13px;color:#6b7280">Estimated total: <span style="color:#374151;font-weight:600">${total}</span></p></td></tr></table>
+${request.items.length > 0 ? `<table width="100%" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;font-size:13px;color:#374151"><thead><tr style="background:#f3f4f6"><th style="padding:8px 12px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase">Item</th><th style="padding:8px 12px;text-align:center;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase">Qty</th><th style="padding:8px 12px;text-align:right;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase">Unit</th><th style="padding:8px 12px;text-align:right;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase">Total</th></tr></thead><tbody>${itemRows}</tbody></table>` : ""}
+<p style="margin:0 0 16px;font-size:14px;color:#374151;font-weight:500">Please click one of the buttons below:</p>
+<table cellpadding="0" cellspacing="0"><tr><td style="padding-right:12px"><a href="${approveUrl}" style="display:inline-block;background:#16a34a;color:#fff;font-size:15px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:8px">✓ Approve</a></td><td><a href="${declineUrl}" style="display:inline-block;background:#dc2626;color:#fff;font-size:15px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:8px">✗ Decline</a></td></tr></table>
+</td></tr>
+<tr><td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center"><p style="margin:0;font-size:12px;color:#9ca3af">Stamped · Purchase Management Portal</p></td></tr>
+</table></td></tr></table></body></html>`;
+
+  const bodyText = `Hi ${advisorName},\n\n${studentName} submitted a purchase request (${request.number} — ${request.title}) for ${request.organization?.name}.\n\nTotal: ${total}\n\nAPPROVE: ${approveUrl}\nDECLINE: ${declineUrl}`;
+
+  const result = await sendEmail({
+    to: request.advisorEmail,
+    subject: `[Action Required] Approve Purchase Request ${request.number} — ${request.title}`,
+    bodyHtml,
+    bodyText,
+  });
+
+  if (!result.sent) {
+    return { sent: false, message: `No email provider configured (SMTP or Graph). Email was NOT sent. Set SMTP_HOST/SMTP_USER/SMTP_PASS or MS_EMAIL_ADDRESS on Render to enable email.` };
+  }
+
+  // Email sent successfully — now persist the token and update status
   if (existingPending) {
     await prisma.approval.update({
       where: { id: existingPending.id },
@@ -309,7 +386,7 @@ async function sendApprovalEmail(input: Record<string, string>, ctx: Ctx) {
   } else {
     await prisma.approval.create({
       data: {
-        requestId,
+        requestId: input.requestId,
         approverEmail: request.advisorEmail,
         approverName: request.advisorName,
         status: "PENDING",
@@ -319,52 +396,26 @@ async function sendApprovalEmail(input: Record<string, string>, ctx: Ctx) {
     });
   }
 
-  // Update status to PENDING_APPROVAL if still SUBMITTED
   if (request.status === "SUBMITTED") {
     await prisma.purchaseRequest.update({
-      where: { id: requestId },
+      where: { id: input.requestId },
       data: { status: "PENDING_APPROVAL" },
     });
   }
 
-  // Try sending the email via the sendEmail utility
-  try {
-    const { sendEmail } = await import("@/lib/mailer");
-    const appUrl = `${ctx.proto}://${ctx.host}`;
-    const approveUrl = `${appUrl}/api/email/decision?token=${token}&action=approve`;
-    const declineUrl = `${appUrl}/api/email/decision?token=${token}&action=decline`;
+  await prisma.auditLog.create({
+    data: {
+      requestId: input.requestId,
+      userId: ctx.userId,
+      action: "EMAIL_SENT",
+      details: `Approval email sent to ${request.advisorEmail} via ${result.via} (AI assistant)`,
+    },
+  });
 
-    const itemsHtml = request.items.map((item) =>
-      `<tr><td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${item.name}</td><td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${item.quantity}</td><td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">$${(item.totalPrice ?? 0).toFixed(2)}</td></tr>`
-    ).join("");
-
-    const html = `<div style="font-family:sans-serif;max-width:560px;margin:0 auto">
-      <h2 style="color:#1e3a5f">Purchase Approval Request</h2>
-      <p><strong>${request.number}</strong> — ${request.title}</p>
-      <p>Organization: ${request.organization?.name ?? "Unknown"}</p>
-      <p>Justification: ${request.justification}</p>
-      ${request.items.length > 0 ? `<table style="width:100%;border-collapse:collapse;margin:16px 0"><thead><tr style="background:#f9fafb"><th style="padding:6px 12px;text-align:left">Item</th><th style="padding:6px 12px;text-align:left">Qty</th><th style="padding:6px 12px;text-align:left">Total</th></tr></thead><tbody>${itemsHtml}</tbody></table>` : ""}
-      <div style="margin:24px 0">
-        <a href="${approveUrl}" style="display:inline-block;padding:12px 28px;background:#16a34a;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;margin-right:12px">Approve</a>
-        <a href="${declineUrl}" style="display:inline-block;padding:12px 28px;background:#dc2626;color:#fff;text-decoration:none;border-radius:6px;font-weight:600">Decline</a>
-      </div>
-    </div>`;
-
-    const result = await sendEmail({
-      to: request.advisorEmail,
-      subject: `Approval needed: ${request.number} — ${request.title}`,
-      bodyHtml: html,
-      bodyText: `Approval needed for ${request.number} — ${request.title}. Please use the link in the HTML version of this email.`,
-    });
-
-    if (result.sent) {
-      return { ok: true, message: "Approval email sent" };
-    }
-    return { ok: true, message: "Email configured as draft — no SMTP/Graph set up. Approval token created." };
-  } catch {
-    return { ok: true, message: "Approval token created but email sending failed. Advisor can still use the link if shared manually." };
-  }
+  return { sent: true, message: `Approval email sent to ${request.advisorEmail} via ${result.via}.` };
 }
+
+// ── Organizations ────────────────────────────────────────────────────────────
 
 async function listOrganizations(ctx: Ctx) {
   if (ctx.isAdmin) {
@@ -374,13 +425,14 @@ async function listOrganizations(ctx: Ctx) {
       orderBy: { name: "asc" },
     });
   }
-
   const memberships = await prisma.organizationMember.findMany({
     where: { userId: ctx.userId },
     include: { organization: { select: { id: true, name: true, code: true, department: true } } },
   });
   return memberships.map((m) => m.organization);
 }
+
+// ── Budgets ──────────────────────────────────────────────────────────────────
 
 async function getBudgets(input: Record<string, string>, ctx: Ctx) {
   const where: any = {};
@@ -392,7 +444,6 @@ async function getBudgets(input: Record<string, string>, ctx: Ctx) {
     });
     where.organizationId = { in: memberships.map((m) => m.organizationId) };
   }
-
   return prisma.budget.findMany({
     where,
     select: {

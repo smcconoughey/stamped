@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withTelemetry } from "@/lib/telemetry";
 
 /**
  * Toggle demo mode on or off.
@@ -8,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
  *
  * Sets/clears a cookie and redirects to the homepage.
  */
-export async function GET(req: NextRequest) {
+export const GET = withTelemetry(async function GET(req: NextRequest) {
   const enable = req.nextUrl.searchParams.get("on") !== "false";
   const redirectTo = req.nextUrl.searchParams.get("redirect") || "/";
   const response = NextResponse.redirect(new URL(redirectTo, req.url));
@@ -25,4 +26,4 @@ export async function GET(req: NextRequest) {
   }
 
   return response;
-}
+});

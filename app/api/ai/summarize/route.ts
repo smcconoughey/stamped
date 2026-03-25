@@ -4,8 +4,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { summarizeRequestQueue } from "@/lib/claude";
 import { differenceInDays } from "date-fns";
+import { withTelemetry } from "@/lib/telemetry";
 
-export async function POST(req: NextRequest) {
+export const POST = withTelemetry(async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -52,4 +53,4 @@ export async function POST(req: NextRequest) {
     console.error("AI summarize error:", error);
     return NextResponse.json({ error: "Failed to generate summary" }, { status: 500 });
   }
-}
+});

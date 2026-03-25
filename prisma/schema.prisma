@@ -284,3 +284,20 @@ model Attachment {
   size      Int?
   createdAt DateTime        @default(now())
 }
+
+model ApiLog {
+  id          String   @id @default(cuid())
+  method      String
+  path        String
+  statusCode  Int
+  durationMs  Int
+  userId      String?
+  tenantId    String?
+  error       String?
+  aiModel     String?
+  aiFunction  String?
+  inputTokens  Int?
+  outputTokens Int?
+  aiCostUsd   Float?
+  createdAt   DateTime @default(now())
+}

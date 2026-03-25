@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { trackAiCall } from "@/lib/telemetry";
 
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -10,13 +11,14 @@ export async function parseApprovalEmail(emailBody: string, requestTitle: string
   summary: string;
   notes?: string;
 }> {
-  const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `You are parsing an email reply from a faculty advisor regarding a student organization purchase request.
+  const response = await trackAiCall(
+    () => anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: `You are parsing an email reply from a faculty advisor regarding a student organization purchase request.
 
 Purchase Request: ${requestNumber} - ${requestTitle}
 
@@ -38,9 +40,12 @@ Respond in JSON only:
   "summary": "one sentence summary of the decision",
   "notes": "any conditions, questions, or important details the advisor mentioned"
 }`,
-      },
-    ],
-  });
+        },
+      ],
+    }),
+    "claude-opus-4-6",
+    "parseApprovalEmail"
+  );
 
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
@@ -64,19 +69,23 @@ export async function summarizeRequestQueue(requests: Array<{
   priority: string;
   daysOld: number;
 }>): Promise<string> {
-  const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
-    max_tokens: 512,
-    messages: [
-      {
-        role: "user",
-        content: `Summarize the following purchase request queue for an admin. Be concise - 2-3 sentences. Highlight urgent items, bottlenecks, or anything that needs immediate attention.
+  const response = await trackAiCall(
+    () => anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 512,
+      messages: [
+        {
+          role: "user",
+          content: `Summarize the following purchase request queue for an admin. Be concise - 2-3 sentences. Highlight urgent items, bottlenecks, or anything that needs immediate attention.
 
 Queue:
 ${requests.map((r) => `- ${r.number} | ${r.organization} | ${r.title} | ${r.status} | Priority: ${r.priority} | ${r.daysOld} days old`).join("\n")}`,
-      },
-    ],
-  });
+        },
+      ],
+    }),
+    "claude-opus-4-6",
+    "summarizeRequestQueue"
+  );
 
   const textBlock = response.content.find((b) => b.type === "text");
   return textBlock?.type === "text" ? textBlock.text : "Queue summary unavailable.";
@@ -92,13 +101,14 @@ export async function scrapeEmailForRequestStatus(emailBody: string): Promise<{
   }>;
   summary: string;
 }> {
-  const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
-    max_tokens: 2048,
-    messages: [
-      {
-        role: "user",
-        content: `Extract purchase/order status information from this email. Look for order numbers, tracking info, delivery dates, vendor info, item descriptions.
+  const response = await trackAiCall(
+    () => anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 2048,
+      messages: [
+        {
+          role: "user",
+          content: `Extract purchase/order status information from this email. Look for order numbers, tracking info, delivery dates, vendor info, item descriptions.
 
 Email:
 ---
@@ -118,9 +128,12 @@ Respond in JSON:
   ],
   "summary": "brief summary of what was found"
 }`,
-      },
-    ],
-  });
+        },
+      ],
+    }),
+    "claude-opus-4-6",
+    "scrapeEmailForRequestStatus"
+  );
 
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
@@ -171,12 +184,13 @@ export async function parseComplexSheet(
 
   const colorSample = colorHints.slice(0, 30).map(h => `row ${h.row}: ${h.color}`).join(", ");
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    messages: [{
-      role: "user",
-      content: `You are parsing a university student organization budget spreadsheet that may have multiple tables, instruction text, and linked data across sections.
+  const response = await trackAiCall(
+    () => anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4096,
+      messages: [{
+        role: "user",
+        content: `You are parsing a university student organization budget spreadsheet that may have multiple tables, instruction text, and linked data across sections.
 
 SPREADSHEET CONTENT (R = row number, cells separated by |):
 ${gridText}
@@ -224,8 +238,11 @@ Return ONLY valid JSON (no markdown):
   },
   "warnings": ["any issues or assumptions made"]
 }`,
-    }],
-  });
+      }],
+    }),
+    "claude-sonnet-4-6",
+    "parseComplexSheet"
+  );
 
   const text = response.content.find(b => b.type === "text");
   if (!text || text.type !== "text") {
@@ -291,12 +308,13 @@ export async function parseImportRows(
     ? `\nRow color highlights (row index → dominant fill color hex):\n${JSON.stringify(colorHints.slice(0, 20))}\n\nCommon spreadsheet color conventions for purchase tracking:\n- Green shades (#70AD47, #92D050, #00B050, light greens) → RECEIVED or PICKED_UP\n- Yellow/gold (#FFD966, #FFC000, #FFFF00, #FFF2CC) → ORDERED or IN_PROGRESS\n- Orange (#F4B183, #FF9900, #FCE4D6) → PARTIALLY_RECEIVED\n- Red (#FF7676, #FF0000, #FFCCCC, #FFC7CE) → CANCELLED\n- Blue (#4472C4, #9DC3E6, #DDEBF7) → APPROVED\n- White / no color → DRAFT or SUBMITTED`
     : "";
 
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1536,
-    messages: [{
-      role: "user",
-      content: `You are normalizing a university student organization spreadsheet for import into a purchasing system.
+  const response = await trackAiCall(
+    () => anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1536,
+      messages: [{
+        role: "user",
+        content: `You are normalizing a university student organization spreadsheet for import into a purchasing system.
 
 Import type: ${type}
 Expected output fields: ${schema.fields.join(", ")}
@@ -340,8 +358,11 @@ Return ONLY valid JSON:
   "metadata": { "organization": "...", "budget_total": "...", "cost_center": "...", "fiscal_year": "..." },
   "warnings": ["any issues noticed, e.g. missing required columns"]
 }`,
-    }],
-  });
+      }],
+    }),
+    "claude-haiku-4-5-20251001",
+    "parseImportRows"
+  );
 
   const text = response.content.find(b => b.type === "text");
   if (!text || text.type !== "text") {

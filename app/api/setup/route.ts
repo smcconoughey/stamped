@@ -6,13 +6,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { withTelemetry } from "@/lib/telemetry";
 
-export async function GET() {
+export const GET = withTelemetry(async function GET() {
   const count = await prisma.user.count();
   return NextResponse.json({ needsSetup: count === 0 });
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withTelemetry(async function POST(req: NextRequest) {
   // Guard: only runs if DB is empty
   const count = await prisma.user.count();
   if (count > 0) {
@@ -59,4 +60,4 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({ success: true, userId: user.id, tenantId: tenant.id });
-}
+});
