@@ -82,11 +82,11 @@ export function AiAssistant() {
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
             {messages.length === 0 && (
               <div className="space-y-2 pt-1">
-                <p className="text-xs text-ink-muted text-center">Ask me anything about Stamped</p>
+                <p className="text-xs text-ink-muted text-center">Ask me anything — I can look things up and take actions for you</p>
                 {[
-                  "How do I import a budget spreadsheet?",
-                  "What does PENDING_APPROVAL mean?",
-                  "How do I add a project number to a budget?",
+                  "What's the status of my latest request?",
+                  "Show me all pending approval requests",
+                  "What are my org's budgets?",
                 ].map(q => (
                   <button
                     key={q}
