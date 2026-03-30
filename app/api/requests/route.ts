@@ -83,7 +83,27 @@ export async function GET(req: NextRequest) {
     take: limit,
   });
 
-  return NextResponse.json({ requests });
+  // FERPA: strip PII from peer requests for non-admin users
+  const sanitized = isAdmin ? requests : requests.map((r) => {
+    const isOwn = r.submittedById === user.id;
+    return {
+      ...r,
+      advisorEmail: isOwn ? r.advisorEmail : undefined,
+      advisorName: isOwn ? r.advisorName : undefined,
+      submittedBy: r.submittedBy ? {
+        id: r.submittedBy.id,
+        name: isOwn ? r.submittedBy.name : r.submittedBy.name?.split(" ")[0] ?? "Member",
+        email: isOwn ? r.submittedBy.email : undefined,
+      } : null,
+      assignedTo: r.assignedTo ? {
+        id: r.assignedTo.id,
+        name: r.assignedTo.name,
+        email: undefined,
+      } : null,
+    };
+  });
+
+  return NextResponse.json({ requests: sanitized });
 }
 
 export async function POST(req: NextRequest) {

@@ -37,9 +37,63 @@ export async function GET(
     return NextResponse.json({ error: "Request not found" }, { status: 404 });
   }
 
-  // Check access: non-admins can only see their own requests
-  if (!isAdmin && request.submittedById !== user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Check access: non-admins can only see their own or org requests
+  const isOwn = request.submittedById === user.id;
+  if (!isAdmin && !isOwn) {
+    // Allow org leads to see requests for their orgs
+    const isOrgLead = user.role === "ORG_LEAD";
+    if (isOrgLead) {
+      const membership = await prisma.organizationMember.findFirst({
+        where: { userId: user.id, organizationId: request.organizationId, memberRole: "LEAD" },
+      });
+      if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    } else {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+
+  // FERPA: strip PII from other users' data for non-admin viewers
+  if (!isAdmin && !isOwn) {
+    const sanitized = {
+      ...request,
+      advisorEmail: undefined,
+      advisorName: undefined,
+      submittedBy: request.submittedBy ? {
+        id: request.submittedBy.id,
+        name: request.submittedBy.name?.split(" ")[0] ?? "Member",
+        email: undefined,
+      } : null,
+      assignedTo: request.assignedTo ? {
+        id: request.assignedTo.id,
+        name: request.assignedTo.name,
+        email: undefined,
+      } : null,
+      auditLogs: request.auditLogs.map((log: any) => ({
+        ...log,
+        user: log.user ? {
+          id: log.user.id,
+          name: log.user.id === user.id ? log.user.name : "Staff",
+          email: undefined,
+        } : null,
+      })),
+    };
+    return NextResponse.json({ request: sanitized });
+  }
+
+  // FERPA: even for own requests, strip other users' emails from audit logs
+  if (!isAdmin) {
+    const sanitizedRequest = {
+      ...request,
+      auditLogs: request.auditLogs.map((log: any) => ({
+        ...log,
+        user: log.user ? {
+          id: log.user.id,
+          name: log.user.id === user.id ? log.user.name : "Staff",
+          email: log.user.id === user.id ? log.user.email : undefined,
+        } : null,
+      })),
+    };
+    return NextResponse.json({ request: sanitizedRequest });
   }
 
   return NextResponse.json({ request });

@@ -97,6 +97,13 @@ export function middleware(request: NextRequest) {
   const isDemoMode = request.cookies.get(DEMO_COOKIE)?.value === "true";
   if (!isDemoMode) return NextResponse.next();
 
+  // Block demo mode entirely in production — real data must never leak
+  if (process.env.NODE_ENV === "production") {
+    const response = NextResponse.next();
+    response.cookies.delete(DEMO_COOKIE);
+    return response;
+  }
+
   if (!pathname.startsWith("/api/")) return NextResponse.next();
 
   // Never intercept auth or demo-toggle routes
@@ -104,21 +111,26 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // In demo mode, mock specific GET routes that would fail for the fake user
+  // In demo mode, return only synthetic data — never pass through to real DB
   if (method === "GET" && pathname === "/api/onboard") {
     return NextResponse.json({
       orgs: [
-        { id: "demo-org-1", name: "Experimental Rocket Propulsion Lab", code: "ERPL", department: "College of Engineering" },
-        { id: "demo-org-2", name: "Robotics Club", code: "ROBO", department: "College of Engineering" },
-        { id: "demo-org-3", name: "Student Government Association", code: "SGA", department: null },
+        { id: "demo-org-1", name: "Demo Engineering Club", code: "DEMO1", department: "Demo Department" },
+        { id: "demo-org-2", name: "Demo Science Society", code: "DEMO2", department: "Demo Department" },
       ],
     });
   }
 
-  // Allow other reads through
-  if (method === "GET" || method === "HEAD") return NextResponse.next();
+  // Block ALL API reads in demo mode too — return empty/synthetic data
+  if (method === "GET" || method === "HEAD") {
+    if (pathname === "/api/requests") return NextResponse.json({ requests: [] });
+    if (pathname === "/api/organizations") return NextResponse.json({ organizations: [], fiscalYears: [] });
+    if (pathname === "/api/users") return NextResponse.json({ users: [] });
+    if (pathname.match(/^\/api\/finance/)) return NextResponse.json({ orgs: [], fiscalYears: [] });
+    return NextResponse.json(mockResponse(pathname, method), { headers: { "x-demo-mode": "true" } });
+  }
 
-  // Block write and return mock success
+  // Block writes and return mock success
   return NextResponse.json(mockResponse(pathname, method), {
     status: 200,
     headers: { "x-demo-mode": "true" },

@@ -10,6 +10,11 @@ import { withTelemetry } from "@/lib/telemetry";
  * Sets/clears a cookie and redirects to the homepage.
  */
 export const GET = withTelemetry(async function GET(req: NextRequest) {
+  // Block demo mode in production to prevent real data exposure
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Demo mode is not available in production" }, { status: 403 });
+  }
+
   const enable = req.nextUrl.searchParams.get("on") !== "false";
   const redirectTo = req.nextUrl.searchParams.get("redirect") || "/";
   const response = NextResponse.redirect(new URL(redirectTo, req.url));

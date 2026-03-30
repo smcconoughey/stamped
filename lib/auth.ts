@@ -117,16 +117,18 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        // ── Demo mode — accept any credentials, return a fake session ──
+        // ── Demo mode — only allowed in non-production environments ──
         if (credentials.demo === "true") {
-          // Find the first tenant so the demo user can see real org data
-          const tenant = await prisma.tenant.findFirst();
+          if (process.env.NODE_ENV === "production") {
+            console.warn("[auth] Demo login blocked in production");
+            return null;
+          }
           return {
             id: "demo-user",
             email: credentials.email,
             name: credentials.email.split("@")[0],
             role: "STUDENT",
-            tenantId: tenant?.id ?? null,
+            tenantId: "demo-tenant",
             onboarded: false,
           } as any;
         }

@@ -23,7 +23,7 @@ export const POST = withTelemetry(async function POST(req: NextRequest) {
 
   const systemPrompt = `You are a concise assistant inside Stamped, a purchasing management app for university student orgs.
 
-Current user: ${user.name || user.email} (${role})
+Current user: ${user.name || "User"} (${role})
 ${context ? `Page: ${context}` : ""}
 
 Rules:
@@ -136,12 +136,15 @@ Rules:
     const toolResults: any[] = [];
     for (const tu of toolUses) {
       if (tu.type !== "tool_use") continue;
-      const result = await executeTool(tu.name, tu.input as Record<string, string>, {
+      let result = await executeTool(tu.name, tu.input as Record<string, string>, {
         userId, tenantId, role, isAdmin, isOrgLead,
         host: req.headers.get("host") || "",
         proto: req.headers.get("host")?.startsWith("localhost") ? "http" : "https",
       });
-      toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
+      // FERPA: scrub PII from tool results before sending to external AI
+      let resultJson = JSON.stringify(result);
+      resultJson = resultJson.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[email redacted]");
+      toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: resultJson });
     }
     claudeMessages.push({ role: "user", content: toolResults });
   }

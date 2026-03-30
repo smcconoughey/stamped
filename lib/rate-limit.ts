@@ -20,7 +20,7 @@ setInterval(() => {
       store.delete(key);
     }
   });
-}, CLEANUP_INTERVAL).unref();
+}, CLEANUP_INTERVAL);
 
 export interface RateLimitResult {
   allowed: boolean;

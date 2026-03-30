@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { trackAiCall } from "@/lib/telemetry";
+import { scrubText, scrubGrid, scrubSampleRows } from "@/lib/scrub-pii";
 
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -24,7 +25,7 @@ Purchase Request: ${requestNumber} - ${requestTitle}
 
 Email Content:
 ---
-${emailBody}
+${scrubText(emailBody)}
 ---
 
 Determine if the advisor:
@@ -112,7 +113,7 @@ export async function scrapeEmailForRequestStatus(emailBody: string): Promise<{
 
 Email:
 ---
-${emailBody}
+${scrubText(emailBody)}
 ---
 
 Respond in JSON:
@@ -168,10 +169,13 @@ export async function parseComplexSheet(
   metadata: Record<string, string>;
   warnings: string[];
 }> {
+  // FERPA: scrub PII (emails, phone numbers) before sending to external AI
+  const scrubbedGrid = scrubGrid(rawGrid);
+
   // Format the grid as a readable representation (cap at 300 rows × 20 cols)
   const MAX_ROWS = 300;
   const MAX_COLS = 20;
-  const gridText = rawGrid
+  const gridText = scrubbedGrid
     .slice(0, MAX_ROWS)
     .map((row, i) => {
       const cells = row.slice(0, MAX_COLS).map(c => String(c ?? "").trim());
@@ -326,7 +330,7 @@ Column headers found (may include metadata rows):
 ${headers.join(", ")}
 
 Sample rows (first ${Math.min(8, sampleRows.length)}):
-${JSON.stringify(sampleRows.slice(0, 8), null, 2)}
+${JSON.stringify(scrubSampleRows(sampleRows.slice(0, 8)), null, 2)}
 ${colorSection}
 
 Mapping rules (be liberal):
