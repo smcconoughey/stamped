@@ -139,6 +139,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Verify user is an approved member of the selected organization (admins bypass)
+  const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+  if (!isAdmin) {
+    const membership = await prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId, userId: user.id } },
+    });
+    if (!membership || membership.status !== "APPROVED") {
+      return NextResponse.json(
+        { error: "You are not an approved member of this organization" },
+        { status: 403 }
+      );
+    }
+  }
+
   // Get or create tenant settings for request numbering
   const settings = await prisma.tenantSettings.findUnique({
     where: { tenantId: user.tenantId },

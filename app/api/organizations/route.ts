@@ -12,10 +12,21 @@ export async function GET(req: NextRequest) {
   const user = session.user as any;
   const { searchParams } = new URL(req.url);
   const fy = searchParams.get("fy"); // e.g. "FY2026" — optional filter
+  const isAdmin = ["ADMIN_STAFF", "FINANCE_ADMIN", "SUPER_ADMIN"].includes(user.role);
+
+  // Non-admins only see organizations they are approved members of
+  const orgWhere: any = { tenantId: user.tenantId, active: true };
+  if (!isAdmin) {
+    const memberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id, status: "APPROVED" },
+      select: { organizationId: true },
+    });
+    orgWhere.id = { in: memberships.map(m => m.organizationId) };
+  }
 
   const [orgs, settings] = await Promise.all([
     prisma.organization.findMany({
-      where: { tenantId: user.tenantId, active: true },
+      where: orgWhere,
       include: {
         budgets: {
           where: fy ? { fiscalYear: fy } : undefined,
