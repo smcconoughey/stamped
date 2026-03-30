@@ -11,16 +11,16 @@ interface Entry {
 
 const store = new Map<string, Entry>();
 
-// Evict stale keys every 5 minutes to prevent memory growth
-const CLEANUP_INTERVAL = 5 * 60 * 1000;
+// Evict stale keys every minute to prevent memory growth
+const CLEANUP_INTERVAL = 60 * 1000;
 setInterval(() => {
   const now = Date.now();
   store.forEach((entry, key) => {
-    if (entry.timestamps.length === 0 || entry.timestamps[entry.timestamps.length - 1] < now - 15 * 60 * 1000) {
+    if (entry.timestamps.length === 0 || entry.timestamps[entry.timestamps.length - 1] < now - 5 * 60 * 1000) {
       store.delete(key);
     }
   });
-}, CLEANUP_INTERVAL);
+}, CLEANUP_INTERVAL).unref();
 
 export interface RateLimitResult {
   allowed: boolean;

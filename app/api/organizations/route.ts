@@ -37,63 +37,67 @@ export async function GET(req: NextRequest) {
   });
   const fiscalYears = allBudgets.map(b => b.fiscalYear);
 
-  // For each org, compute real spent/reserved from requests
   const orgIds = orgs.map(o => o.id);
-  const requests = await prisma.purchaseRequest.findMany({
-    where: { organizationId: { in: orgIds }, status: { not: "CANCELLED" } },
-    select: { organizationId: true, budgetId: true, status: true, totalActual: true, totalEstimated: true },
-  });
 
-  // Also count active requests per org
-  const requestCounts = await prisma.purchaseRequest.groupBy({
-    by: ["organizationId"],
-    where: { organizationId: { in: orgIds }, status: { not: "CANCELLED" } },
-    _count: { id: true },
-  });
+  // Use groupBy aggregation instead of loading all requests into memory
+  const terminalStatuses = ["RECEIVED", "PICKED_UP"];
+  const [spentAgg, reservedAgg, requestCounts] = await Promise.all([
+    // Spent: terminal status requests grouped by org + budget
+    prisma.purchaseRequest.groupBy({
+      by: ["organizationId", "budgetId"],
+      where: { organizationId: { in: orgIds }, status: { in: terminalStatuses } },
+      _sum: { totalActual: true, totalEstimated: true },
+    }),
+    // Reserved: non-terminal, non-cancelled requests grouped by org + budget
+    prisma.purchaseRequest.groupBy({
+      by: ["organizationId", "budgetId"],
+      where: { organizationId: { in: orgIds }, status: { notIn: [...terminalStatuses, "CANCELLED"] } },
+      _sum: { totalActual: true, totalEstimated: true },
+    }),
+    // Count active requests per org
+    prisma.purchaseRequest.groupBy({
+      by: ["organizationId"],
+      where: { organizationId: { in: orgIds }, status: { not: "CANCELLED" } },
+      _count: { id: true },
+    }),
+  ]);
   const reqCountMap = new Map(requestCounts.map(r => [r.organizationId, r._count.id]));
 
+  // Build lookup: orgId -> budgetId -> { spent, reserved }
+  const aggMap = new Map<string, Map<string | null, { spent: number; reserved: number }>>();
+  for (const row of spentAgg) {
+    const key = row.budgetId ?? null;
+    if (!aggMap.has(row.organizationId)) aggMap.set(row.organizationId, new Map());
+    const budgetMap = aggMap.get(row.organizationId)!;
+    const existing = budgetMap.get(key) ?? { spent: 0, reserved: 0 };
+    existing.spent += (row._sum.totalActual ?? 0) || (row._sum.totalEstimated ?? 0);
+    budgetMap.set(key, existing);
+  }
+  for (const row of reservedAgg) {
+    const key = row.budgetId ?? null;
+    if (!aggMap.has(row.organizationId)) aggMap.set(row.organizationId, new Map());
+    const budgetMap = aggMap.get(row.organizationId)!;
+    const existing = budgetMap.get(key) ?? { spent: 0, reserved: 0 };
+    existing.reserved += (row._sum.totalActual ?? 0) || (row._sum.totalEstimated ?? 0);
+    budgetMap.set(key, existing);
+  }
+
   const enriched = orgs.map(org => {
-    const orgRequests = requests.filter(r => r.organizationId === org.id);
+    const budgetMap = aggMap.get(org.id) ?? new Map();
     const singleBudget = org.budgets.length === 1 ? org.budgets[0] : null;
+    const unlinked = budgetMap.get(null) ?? { spent: 0, reserved: 0 };
 
     let totalAllocated = 0;
     let totalSpent = 0;
     let totalReserved = 0;
-    let unlinkedSpent = 0;
-    let unlinkedReserved = 0;
-
-    for (const r of orgRequests) {
-      const amt = (r.totalActual ?? 0) || (r.totalEstimated ?? 0);
-      if (!amt) continue;
-      const terminal = TERMINAL.has(r.status);
-      if (r.budgetId) {
-        if (terminal) {
-          // will be added per-budget below
-        }
-      } else {
-        if (terminal) unlinkedSpent += amt;
-        else unlinkedReserved += amt;
-      }
-    }
-
-    // Per-budget aggregation
-    const spentByBudget: Record<string, number> = {};
-    const reservedByBudget: Record<string, number> = {};
-    for (const r of orgRequests) {
-      if (!r.budgetId) continue;
-      const amt = (r.totalActual ?? 0) || (r.totalEstimated ?? 0);
-      if (!amt) continue;
-      const terminal = TERMINAL.has(r.status);
-      if (terminal) spentByBudget[r.budgetId] = (spentByBudget[r.budgetId] ?? 0) + amt;
-      else reservedByBudget[r.budgetId] = (reservedByBudget[r.budgetId] ?? 0) + amt;
-    }
 
     const budgets = org.budgets.map(b => {
-      let spent = spentByBudget[b.id] ?? 0;
-      let reserved = reservedByBudget[b.id] ?? 0;
+      const agg = budgetMap.get(b.id) ?? { spent: 0, reserved: 0 };
+      let spent = agg.spent;
+      let reserved = agg.reserved;
       if (singleBudget?.id === b.id) {
-        spent += unlinkedSpent;
-        reserved += unlinkedReserved;
+        spent += unlinked.spent;
+        reserved += unlinked.reserved;
       }
       totalAllocated += b.allocated;
       totalSpent += spent;
@@ -101,10 +105,9 @@ export async function GET(req: NextRequest) {
       return { ...b, spent, reserved };
     });
 
-    // If no budgets in this FY but there are unlinked requests, still surface them
     if (org.budgets.length === 0) {
-      totalSpent += unlinkedSpent;
-      totalReserved += unlinkedReserved;
+      totalSpent += unlinked.spent;
+      totalReserved += unlinked.reserved;
     }
 
     return {

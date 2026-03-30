@@ -38,33 +38,38 @@ export async function GET(req: NextRequest) {
     orderBy: { name: "asc" },
   });
 
-  // Pull ALL non-cancelled requests for these orgs
+  // Use DB-level aggregation instead of loading all requests into memory
   const orgIds = orgs.map((o) => o.id);
-  const requests = await prisma.purchaseRequest.findMany({
-    where: { organizationId: { in: orgIds }, status: { not: "CANCELLED" } },
-    select: { organizationId: true, budgetId: true, status: true, totalActual: true, totalEstimated: true },
-  });
+  const terminalStatuses = ["RECEIVED", "PICKED_UP"];
+
+  const [spentAgg, reservedAgg] = await Promise.all([
+    prisma.purchaseRequest.groupBy({
+      by: ["organizationId", "budgetId"],
+      where: { organizationId: { in: orgIds }, status: { in: terminalStatuses } },
+      _sum: { totalActual: true, totalEstimated: true },
+    }),
+    prisma.purchaseRequest.groupBy({
+      by: ["organizationId", "budgetId"],
+      where: { organizationId: { in: orgIds }, status: { notIn: [...terminalStatuses, "CANCELLED"] } },
+      _sum: { totalActual: true, totalEstimated: true },
+    }),
+  ]);
 
   // Build per-budget spending maps
   const spentByBudget: Record<string, number> = {};
   const reservedByBudget: Record<string, number> = {};
-  // Track unlinked amounts per org (requests with no budgetId)
   const unlinkedSpentByOrg: Record<string, number> = {};
   const unlinkedReservedByOrg: Record<string, number> = {};
 
-  for (const r of requests) {
-    const amt = (r.totalActual ?? 0) || (r.totalEstimated ?? 0);
-    if (!amt) continue;
-    const terminal = TERMINAL.has(r.status);
-
-    if (r.budgetId) {
-      if (terminal) spentByBudget[r.budgetId] = (spentByBudget[r.budgetId] ?? 0) + amt;
-      else          reservedByBudget[r.budgetId] = (reservedByBudget[r.budgetId] ?? 0) + amt;
-    } else {
-      // No budget linked — attribute to org pool
-      if (terminal) unlinkedSpentByOrg[r.organizationId] = (unlinkedSpentByOrg[r.organizationId] ?? 0) + amt;
-      else          unlinkedReservedByOrg[r.organizationId] = (unlinkedReservedByOrg[r.organizationId] ?? 0) + amt;
-    }
+  for (const row of spentAgg) {
+    const amt = (row._sum.totalActual ?? 0) || (row._sum.totalEstimated ?? 0);
+    if (row.budgetId) spentByBudget[row.budgetId] = (spentByBudget[row.budgetId] ?? 0) + amt;
+    else unlinkedSpentByOrg[row.organizationId] = (unlinkedSpentByOrg[row.organizationId] ?? 0) + amt;
+  }
+  for (const row of reservedAgg) {
+    const amt = (row._sum.totalActual ?? 0) || (row._sum.totalEstimated ?? 0);
+    if (row.budgetId) reservedByBudget[row.budgetId] = (reservedByBudget[row.budgetId] ?? 0) + amt;
+    else unlinkedReservedByOrg[row.organizationId] = (unlinkedReservedByOrg[row.organizationId] ?? 0) + amt;
   }
 
   // Collect all distinct fiscal years across all orgs (for FY selector)

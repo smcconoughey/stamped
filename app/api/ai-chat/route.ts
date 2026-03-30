@@ -200,11 +200,22 @@ async function searchRequests(input: Record<string, string>, ctx: Ctx) {
 
   if (input.status) where.status = input.status;
 
-  // Fetch a broader set then filter case-insensitively in JS
+  // When searching, use DB-level filtering instead of loading hundreds of rows
+  if (input.query) {
+    const q = input.query;
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { number: { contains: q, mode: "insensitive" } },
+      { vendorName: { contains: q, mode: "insensitive" } },
+      { organization: { name: { contains: q, mode: "insensitive" } } },
+      { organization: { code: { contains: q, mode: "insensitive" } } },
+    ];
+  }
+
   const requests = await prisma.purchaseRequest.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    take: input.query ? 200 : 20, // fetch more when searching to filter in JS
+    take: 20,
     select: {
       id: true, number: true, title: true, status: true, priority: true,
       vendorName: true, totalEstimated: true, neededBy: true,
@@ -216,21 +227,7 @@ async function searchRequests(input: Record<string, string>, ctx: Ctx) {
     },
   });
 
-  if (!input.query) {
-    return { count: requests.length, requests: requests.slice(0, 20) };
-  }
-
-  // Case-insensitive JS filter
-  const q = input.query.toLowerCase();
-  const filtered = requests.filter((r) =>
-    (r.title && r.title.toLowerCase().includes(q)) ||
-    (r.number && r.number.toLowerCase().includes(q)) ||
-    (r.vendorName && r.vendorName.toLowerCase().includes(q)) ||
-    (r.organization?.name && r.organization.name.toLowerCase().includes(q)) ||
-    (r.organization?.code && r.organization.code.toLowerCase().includes(q))
-  );
-
-  return { count: filtered.length, requests: filtered.slice(0, 20) };
+  return { count: requests.length, requests };
 }
 
 // ── Get request by ID or number (case-insensitive number match) ──────────────
@@ -251,18 +248,19 @@ async function getRequest(input: Record<string, string>, ctx: Ctx) {
     },
   });
 
-  // If not found and input looks like a partial number, try fuzzy
+  // If not found and input looks like a partial number, try DB-level fuzzy match
   if (!request && /^\d+$/.test(id)) {
-    const allRequests = await prisma.purchaseRequest.findMany({
-      where: ctx.isAdmin
-        ? { organization: { tenantId: ctx.tenantId } }
-        : ctx.isOrgLead
-        ? {}
-        : { submittedById: ctx.userId },
+    const fuzzyWhere: any = {
+      number: { contains: id, mode: "insensitive" },
+    };
+    if (ctx.isAdmin) fuzzyWhere.organization = { tenantId: ctx.tenantId };
+    else if (!ctx.isOrgLead) fuzzyWhere.submittedById = ctx.userId;
+
+    const match = await prisma.purchaseRequest.findFirst({
+      where: fuzzyWhere,
       select: { id: true, number: true },
-      take: 500,
+      orderBy: { createdAt: "desc" },
     });
-    const match = allRequests.find((r) => r.number.includes(id));
     if (match) {
       request = await prisma.purchaseRequest.findUnique({
         where: { id: match.id },
