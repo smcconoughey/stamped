@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Header } from "@/components/layout/header";
@@ -277,6 +280,13 @@ export default function RequestDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState("");
 
+  // Attachment state
+  const [previewAttachment, setPreviewAttachment] = useState<any>(null);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [attachDragOver, setAttachDragOver] = useState(false);
+  const [attachError, setAttachError] = useState("");
+  const attachInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => { fetchRequest(); }, [id]);
 
   async function fetchRequest() {
@@ -424,6 +434,59 @@ export default function RequestDetailPage() {
     } finally {
       setSavingEdit(false);
     }
+  }
+
+  // ── Attachment handlers ──────────────────────────────────────────────────
+  function formatFileSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  async function handleUploadAttachments(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    // Validate
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      if (file.size > MAX_FILE_SIZE) {
+        setAttachError(`"${file.name}" exceeds 10 MB limit`);
+        return;
+      }
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        setAttachError(`"${file.name}" — unsupported type. Use PDF, PNG, JPG, WEBP, or GIF.`);
+        return;
+      }
+    }
+    setAttachError("");
+    setUploadingFiles(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < fileList.length; i++) {
+        formData.append("files", fileList[i]);
+      }
+      const res = await fetch(`/api/requests/${id}/attachments`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        setAttachError(d.error || "Upload failed");
+        return;
+      }
+      await fetchRequest();
+    } catch {
+      setAttachError("Network error uploading files");
+    } finally {
+      setUploadingFiles(false);
+    }
+  }
+
+  async function handleDeleteAttachment(attachmentId: string, filename: string) {
+    if (!confirm(`Delete attachment "${filename}"?`)) return;
+    try {
+      await fetch(`/api/requests/${id}/attachments?attachmentId=${attachmentId}`, { method: "DELETE" });
+      await fetchRequest();
+    } catch {}
   }
 
   if (loading) {
@@ -743,6 +806,96 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
+          {/* Attachments */}
+          <div className="card p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-sm font-semibold text-ink">Attachments</h2>
+              {request.attachments?.length > 0 && (
+                <span className="text-xs text-ink-muted">{request.attachments.length} file{request.attachments.length !== 1 ? "s" : ""}</span>
+              )}
+            </div>
+
+            {/* File list */}
+            {request.attachments?.length > 0 ? (
+              <div className="space-y-2">
+                {request.attachments.map((att: any) => (
+                  <div key={att.id} className="flex items-center justify-between bg-paper rounded-md px-3 py-2.5 group">
+                    <button
+                      onClick={() => setPreviewAttachment(att)}
+                      className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-80 transition-opacity"
+                    >
+                      <span className="text-base flex-shrink-0">{att.mimeType === "application/pdf" ? "📄" : "🖼️"}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm text-navy font-medium truncate hover:underline">{att.filename}</p>
+                        <p className="text-xs text-ink-muted">
+                          {att.mimeType?.split("/")[1]?.toUpperCase() || "FILE"}
+                          {att.size ? ` · ${formatFileSize(att.size)}` : ""}
+                        </p>
+                      </div>
+                    </button>
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <a
+                        href={att.url}
+                        download={att.filename}
+                        className="text-xs text-ink-muted hover:text-ink px-1.5 py-1"
+                        title="Download"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        ↓
+                      </a>
+                      {canEdit && (
+                        <button
+                          onClick={() => handleDeleteAttachment(att.id, att.filename)}
+                          className="text-xs text-red-500 hover:text-red-700 px-1.5 py-1"
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-ink-muted">No attachments yet.</p>
+            )}
+
+            {/* Upload zone — always visible for users who can edit */}
+            {canEdit && (
+              <div>
+                {attachError && <p className="text-xs text-red-600 mb-2">{attachError}</p>}
+                <div
+                  className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                    attachDragOver ? "border-navy bg-navy/5" : "border-border hover:border-ink-muted"
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setAttachDragOver(true); }}
+                  onDragLeave={() => setAttachDragOver(false)}
+                  onDrop={(e) => { e.preventDefault(); setAttachDragOver(false); handleUploadAttachments(e.dataTransfer.files); }}
+                  onClick={() => attachInputRef.current?.click()}
+                >
+                  <input
+                    ref={attachInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"
+                    className="hidden"
+                    onChange={(e) => { handleUploadAttachments(e.target.files); e.target.value = ""; }}
+                  />
+                  {uploadingFiles ? (
+                    <p className="text-sm text-ink-muted animate-pulse">Uploading…</p>
+                  ) : (
+                    <>
+                      <svg className="mx-auto w-6 h-6 text-ink-muted mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" />
+                      </svg>
+                      <p className="text-xs text-ink-secondary">Drop files or <span className="text-navy font-medium">browse</span> · PDF, images · 10 MB max</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Activity Log / Changelog */}
           <div className="card p-5">
             <h2 className="text-sm font-semibold text-ink border-b border-border pb-3 mb-4">Activity Log</h2>
@@ -937,6 +1090,60 @@ export default function RequestDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Attachment Preview Modal ── */}
+      {previewAttachment && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPreviewAttachment(null)}>
+          <div className="relative bg-white rounded-xl shadow-2xl max-w-4xl w-[90vw] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border flex-shrink-0">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink truncate">{previewAttachment.filename}</p>
+                <p className="text-xs text-ink-muted">
+                  {previewAttachment.mimeType?.split("/")[1]?.toUpperCase()}
+                  {previewAttachment.size ? ` · ${formatFileSize(previewAttachment.size)}` : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={previewAttachment.url}
+                  download={previewAttachment.filename}
+                  className="px-3 py-1.5 text-xs font-medium text-navy border border-navy/30 rounded-md hover:bg-navy/5 transition-colors"
+                >
+                  Download
+                </a>
+                <button
+                  onClick={() => setPreviewAttachment(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-paper transition-colors text-ink-muted hover:text-ink"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-2 flex items-center justify-center min-h-[400px]">
+              {previewAttachment.mimeType === "application/pdf" ? (
+                <iframe
+                  src={previewAttachment.url}
+                  className="w-full h-[75vh] rounded border-0"
+                  title={previewAttachment.filename}
+                />
+              ) : previewAttachment.mimeType?.startsWith("image/") ? (
+                <img
+                  src={previewAttachment.url}
+                  alt={previewAttachment.filename}
+                  className="max-w-full max-h-[75vh] object-contain rounded"
+                />
+              ) : (
+                <div className="text-center p-8">
+                  <p className="text-ink-muted text-sm">Preview not available for this file type.</p>
+                  <a href={previewAttachment.url} download={previewAttachment.filename} className="text-navy text-sm hover:underline mt-2 inline-block">Download file</a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

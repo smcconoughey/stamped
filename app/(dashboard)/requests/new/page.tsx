@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Header } from "@/components/layout/header";
@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/utils";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
 
 interface LineItem {
   id: string;
@@ -47,6 +50,9 @@ export default function NewRequestPage() {
   });
 
   const [items, setItems] = useState<LineItem[]>([newLineItem()]);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchOrgs();
@@ -115,6 +121,35 @@ export default function NewRequestPage() {
     return sum + price * qty;
   }, 0);
 
+  function handleFilesSelected(fileList: FileList | null) {
+    if (!fileList) return;
+    const newFiles: File[] = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      if (file.size > MAX_FILE_SIZE) {
+        setErrors((e) => ({ ...e, attachments: `"${file.name}" exceeds 10 MB limit` }));
+        return;
+      }
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        setErrors((e) => ({ ...e, attachments: `"${file.name}" — unsupported type. Use PDF, PNG, JPG, WEBP, or GIF.` }));
+        return;
+      }
+      newFiles.push(file);
+    }
+    setAttachments((prev) => [...prev, ...newFiles]);
+    setErrors((e) => ({ ...e, attachments: "" }));
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function formatFileSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
   async function handleSubmit(submitNow: boolean) {
     if (!validate()) return;
 
@@ -137,6 +172,17 @@ export default function NewRequestPage() {
       }
 
       const data = await res.json();
+
+      // Upload attachments if any
+      if (attachments.length > 0) {
+        const formData = new FormData();
+        attachments.forEach((file) => formData.append("files", file));
+        await fetch(`/api/requests/${data.request.id}/attachments`, {
+          method: "POST",
+          body: formData,
+        });
+      }
+
       router.push(`/requests/${data.request.id}`);
     } catch {
       setErrors({ submit: "Network error. Please try again." });
@@ -374,6 +420,55 @@ export default function NewRequestPage() {
                 <span className="text-ink-secondary">Estimated Total: </span>
                 <span className="font-semibold text-ink">{formatCurrency(totalEstimated)}</span>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Attachments */}
+        <div className="card p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-ink border-b border-border pb-3">
+            Attachments (Optional)
+          </h2>
+          <p className="text-xs text-ink-muted">Upload quotes, receipts, or supporting documents. Max 10 MB per file. PDF, PNG, JPG, WEBP, GIF accepted.</p>
+          {errors.attachments && (
+            <p className="text-xs text-red-600">{errors.attachments}</p>
+          )}
+          <div
+            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+              dragOver ? "border-navy bg-navy/5" : "border-border hover:border-ink-muted"
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFilesSelected(e.dataTransfer.files); }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"
+              className="hidden"
+              onChange={(e) => { handleFilesSelected(e.target.files); e.target.value = ""; }}
+            />
+            <svg className="mx-auto w-8 h-8 text-ink-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" />
+            </svg>
+            <p className="text-sm text-ink-secondary">Drag & drop files here or <span className="text-navy font-medium">browse</span></p>
+          </div>
+          {attachments.length > 0 && (
+            <div className="space-y-2">
+              {attachments.map((file, index) => (
+                <div key={index} className="flex items-center justify-between bg-paper rounded-md px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-xs">{ file.type === "application/pdf" ? "📄" : "🖼️" }</span>
+                    <span className="text-sm text-ink truncate">{file.name}</span>
+                    <span className="text-xs text-ink-muted flex-shrink-0">{formatFileSize(file.size)}</span>
+                  </div>
+                  <button type="button" onClick={() => removeAttachment(index)} className="text-xs text-red-600 hover:text-red-800 flex-shrink-0 ml-2">
+                    Remove
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
