@@ -24,7 +24,7 @@ const navigation: NavGroup[] = [
   {
     section: "Overview",
     items: [
-      { label: "Dashboard", href: "/" },
+      { label: "Dashboard", href: "/dashboard" },
       { label: "My Requests", href: "/requests", nonAdminOnly: true },
       { label: "New Request", href: "/requests/new", nonAdminOnly: true },
     ],

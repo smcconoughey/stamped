@@ -61,7 +61,7 @@ export default function OnboardPage() {
       body: JSON.stringify(payload),
     });
     if (res.ok) {
-      router.push("/");
+      router.push("/dashboard");
     } else {
       const d = await res.json();
       setError(d.error || "Something went wrong.");

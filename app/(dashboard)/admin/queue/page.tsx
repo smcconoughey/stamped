@@ -104,7 +104,7 @@ export default function AdminQueuePage() {
   const [sortCol, setSortCol] = useState<SortCol>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  useEffect(() => { if (!isAdmin && user) router.push("/"); }, [isAdmin, user]);
+  useEffect(() => { if (!isAdmin && user) router.push("/dashboard"); }, [isAdmin, user]);
   useEffect(() => { fetchRequests(); }, []);
 
   const fetchRequests = useCallback(async () => {
