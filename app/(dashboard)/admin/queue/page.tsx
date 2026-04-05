@@ -32,6 +32,17 @@ const STATUS_META: Record<string, { label: string; cls: string; order: number }>
 
 const PRIORITY_ORDER: Record<string, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
 
+const STALE_DAYS = 5;
+function isStale(req: any): boolean {
+  if (!["SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED"].includes(req.status)) return false;
+  const updated = new Date(req.updatedAt ?? req.createdAt).getTime();
+  return Date.now() - updated > STALE_DAYS * 86400000;
+}
+function staleDays(req: any): number {
+  const updated = new Date(req.updatedAt ?? req.createdAt).getTime();
+  return Math.floor((Date.now() - updated) / 86400000);
+}
+
 const ACTIVE_STATUSES = ["SUBMITTED","PENDING_APPROVAL","APPROVED","ORDERED","PARTIALLY_RECEIVED","RECEIVED","READY_FOR_PICKUP"];
 
 const FILTER_TABS = [
@@ -94,7 +105,7 @@ export default function AdminQueuePage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [draftEmail, setDraftEmail] = useState<{ to: string; subject: string; body: string } | null>(null);
 
-  useEffect(() => { if (!isAdmin && user) router.push("/"); }, [isAdmin, user]);
+  useEffect(() => { if (!isAdmin && user) router.push("/dashboard"); }, [isAdmin, user]);
   useEffect(() => { fetchRequests(); }, []);
 
   const fetchRequests = useCallback(async () => {
@@ -279,6 +290,42 @@ export default function AdminQueuePage() {
           })}
         </div>
 
+        {/* Dollar-value blocked by stage */}
+        {!loading && requests.length > 0 && (() => {
+          const stageTotals = Object.entries(STATUS_META)
+            .filter(([s]) => s !== "PICKED_UP")
+            .map(([status, meta]) => {
+              const reqs = requests.filter((r: any) => r.status === status);
+              if (!reqs.length) return null;
+              const total = reqs.reduce((sum: number, r: any) => sum + (r.totalActual ?? r.totalEstimated ?? 0), 0);
+              const staleCount = reqs.filter(isStale).length;
+              return { status, label: meta.label, count: reqs.length, total, staleCount };
+            })
+            .filter(Boolean) as { status: string; label: string; count: number; total: number; staleCount: number }[];
+          if (!stageTotals.length) return null;
+          return (
+            <div className="flex flex-wrap gap-2">
+              {stageTotals.map(({ status, label, count, total, staleCount }) => (
+                <button key={status} onClick={() => setActiveFilter(status)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs transition-colors ${
+                    activeFilter === status
+                      ? "bg-navy text-white border-navy"
+                      : "bg-white border-border text-ink-secondary hover:border-navy hover:text-navy"
+                  }`}>
+                  <span className="font-medium">{label}</span>
+                  <span className="opacity-60">{count}</span>
+                  {total > 0 && <span className="font-semibold">{formatCurrency(total)}</span>}
+                  {staleCount > 0 && (
+                    <span className={`ml-0.5 px-1 rounded text-[10px] font-bold ${activeFilter === status ? "bg-white/20 text-white" : "bg-orange-100 text-orange-700"}`}>
+                      {staleCount} stale
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* Sort controls */}
         {!loading && requests.length > 1 && (
           <div className="flex items-center gap-1">
@@ -320,6 +367,8 @@ export default function AdminQueuePage() {
               const primaryNext = PRIMARY_NEXT[req.status];
               const meta = STATUS_META[req.status];
               const isStamped = stampedIds.has(req.id);
+              const stale = isStale(req);
+              const staleDaysCount = stale ? staleDays(req) : 0;
               return (
                 <div key={req.id}
                   className={`card p-0 overflow-hidden transition-all duration-300 ${isStamped ? "stamp-flash" : "hover:shadow-md"}`}>
@@ -370,6 +419,15 @@ export default function AdminQueuePage() {
                           ? PRIORITY_LABELS[req.priority as keyof typeof PRIORITY_LABELS] ?? req.priority
                           : "·"}
                       </span>
+
+                      {stale && (
+                        <span className="hidden lg:inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 border border-orange-200">
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                          </svg>
+                          {staleDaysCount}d stale
+                        </span>
+                      )}
                     </div>
 
                     {/* Action zone — fixed width so every row aligns */}

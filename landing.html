@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stamped — University Purchasing Management</title>
+  <meta name="description" content="A modern procurement portal for student organizations. Submit requests, get advisor approval, and track orders — all in one place.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy: #1B3A6B;
+      --navy-light: #234D8F;
+      --navy-dark: #122549;
+      --stamp: #C2400C;
+      --stamp-light: #D4531F;
+      --paper: #F7F6F3;
+      --card: #FFFFFF;
+      --border: #E4E1D9;
+      --ink: #1A1916;
+      --ink-secondary: #6B6760;
+      --ink-muted: #9C9890;
+      --status-draft: #9C9890;
+      --status-submitted: #2563EB;
+      --status-pending: #B45309;
+      --status-approved: #1A6B3C;
+      --status-ordered: #6D28D9;
+      --status-received: #0E7490;
+      --status-ready: #047857;
+      --status-complete: #6B6760;
+      --shadow-card: 0 1px 3px 0 rgba(26,25,22,0.08), 0 1px 2px -1px rgba(26,25,22,0.06);
+      --shadow-card-hover: 0 4px 6px -1px rgba(26,25,22,0.08), 0 2px 4px -2px rgba(26,25,22,0.06);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── Nav ── */
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: var(--navy);
+      font-weight: 700;
+      font-size: 1.25rem;
+    }
+
+    .nav-logo {
+      width: 36px;
+      height: 36px;
+      background: var(--navy);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: var(--ink-secondary);
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--navy); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.6rem 1.4rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+
+    .btn-navy {
+      background: var(--navy);
+      color: white;
+    }
+    .btn-navy:hover { background: var(--navy-light); }
+
+    .btn-stamp {
+      background: var(--stamp);
+      color: white;
+    }
+    .btn-stamp:hover { background: var(--stamp-light); }
+
+    .btn-outline {
+      background: transparent;
+      color: white;
+      border: 2px solid rgba(255,255,255,0.5);
+    }
+    .btn-outline:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: white;
+    }
+
+    .btn-lg {
+      padding: 0.85rem 2rem;
+      font-size: 1rem;
+    }
+
+    .hamburger {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.5rem;
+    }
+
+    .hamburger svg { display: block; }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 10rem 0 8rem;
+      background: linear-gradient(135deg, var(--navy) 0%, var(--navy-dark) 100%);
+      position: relative;
+      overflow: hidden;
+      clip-path: polygon(0 0, 100% 0, 100% 88%, 0 100%);
+    }
+
+    .hero::after {
+      content: 'APPROVED';
+      position: absolute;
+      top: 50%;
+      right: -2%;
+      transform: translate(-50%, -50%) rotate(-15deg);
+      font-size: 10rem;
+      font-weight: 800;
+      color: rgba(255,255,255,0.03);
+      letter-spacing: 0.1em;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      max-width: 720px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      padding: 0.4rem 1rem;
+      background: rgba(194, 64, 12, 0.15);
+      color: #F7A072;
+      border: 1px solid rgba(194, 64, 12, 0.3);
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      font-size: 3.2rem;
+      font-weight: 700;
+      color: white;
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero p {
+      font-size: 1.2rem;
+      color: rgba(255,255,255,0.75);
+      max-width: 560px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+
+    .hero-ctas {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ── Sections ── */
+    .section {
+      padding: 6rem 0;
+    }
+
+    .section-paper { background: var(--paper); }
+    .section-white { background: var(--card); }
+    .section-dark { background: var(--navy-dark); color: white; }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .section-header h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+
+    .section-dark .section-header h2 { color: white; }
+
+    .section-header p {
+      font-size: 1.1rem;
+      color: var(--ink-secondary);
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    .section-dark .section-header p { color: rgba(255,255,255,0.6); }
+
+    /* ── Features Grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: var(--shadow-card);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-card-hover);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--navy);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.25rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature-card p {
+      font-size: 0.92rem;
+      color: var(--ink-secondary);
+      line-height: 1.6;
+    }
+
+    /* ── Workflow Pipeline ── */
+    .pipeline {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 0;
+      position: relative;
+      padding: 2rem 0;
+    }
+
+    .pipeline-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      flex: 1;
+      position: relative;
+      max-width: 140px;
+    }
+
+    .pipeline-node {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 0.85rem;
+      position: relative;
+      z-index: 2;
+      flex-shrink: 0;
+    }
+
+    .pipeline-step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 22px;
+      left: calc(50% + 22px);
+      width: calc(100% - 44px);
+      height: 3px;
+      background: var(--border);
+      z-index: 1;
+    }
+
+    .pipeline-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-top: 0.75rem;
+      color: var(--ink);
+      line-height: 1.3;
+    }
+
+    .pipeline-desc {
+      font-size: 0.7rem;
+      color: var(--ink-muted);
+      margin-top: 0.25rem;
+      line-height: 1.4;
+    }
+
+    .pipeline-callout {
+      margin-top: 3rem;
+      padding: 1rem 1.5rem;
+      background: #FFF7ED;
+      border-left: 4px solid var(--stamp);
+      border-radius: 0 8px 8px 0;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .pipeline-callout p {
+      font-size: 0.9rem;
+      color: var(--ink-secondary);
+    }
+
+    .pipeline-callout strong { color: var(--stamp); }
+
+    /* ── Roles ── */
+    .roles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .role-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem;
+      box-shadow: var(--shadow-card);
+      border-left: 4px solid var(--navy);
+    }
+
+    .role-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .role-card .role-subtitle {
+      font-size: 0.82rem;
+      color: var(--ink-muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .role-card ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .role-card li {
+      font-size: 0.9rem;
+      color: var(--ink-secondary);
+      padding: 0.3rem 0;
+      padding-left: 1.25rem;
+      position: relative;
+    }
+
+    .role-card li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.7rem;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--navy);
+      opacity: 0.4;
+    }
+
+    /* ── Onboarding ── */
+    .onboarding-tracks {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+    }
+
+    .track h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .track-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .track-step {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+
+    .step-number {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--navy);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+
+    .step-content h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .step-content p {
+      font-size: 0.9rem;
+      color: var(--ink-secondary);
+    }
+
+    .onboarding-cta {
+      text-align: center;
+      margin-top: 3.5rem;
+    }
+
+    /* ── Tech Stack ── */
+    .tech-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+
+    .tech-pill {
+      padding: 0.5rem 1.25rem;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 100px;
+      color: rgba(255,255,255,0.85);
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+
+    .tech-pill:hover { background: rgba(255,255,255,0.15); }
+
+    .tech-desc {
+      text-align: center;
+      max-width: 600px;
+      margin: 0 auto;
+      font-size: 0.95rem;
+      color: rgba(255,255,255,0.55);
+      line-height: 1.7;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      background: var(--navy-dark);
+      color: white;
+      padding: 3rem 0 1.5rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .footer-brand-name {
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+
+    .footer-brand-tagline {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+      list-style: none;
+    }
+
+    .footer-links a {
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: white; }
+
+    .footer-bottom {
+      text-align: center;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.35);
+    }
+
+    /* ── Animations ── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-hero {
+      animation: fadeInUp 0.7s ease-out both;
+    }
+
+    .animate-hero:nth-child(2) { animation-delay: 0.1s; }
+    .animate-hero:nth-child(3) { animation-delay: 0.2s; }
+    .animate-hero:nth-child(4) { animation-delay: 0.3s; }
+
+    .animate-on-scroll {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+
+    .animate-on-scroll.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .animate-hero { animation: none; opacity: 1; transform: none; }
+      .animate-on-scroll { opacity: 1; transform: none; transition: none; }
+    }
+
+    /* ── Focus ── */
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid var(--navy);
+      outline-offset: 2px;
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 1024px) {
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 768px) {
+      .hamburger { display: block; }
+
+      .nav-links {
+        display: none;
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        background: white;
+        flex-direction: column;
+        padding: 1.5rem;
+        gap: 1rem;
+        border-bottom: 1px solid var(--border);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      }
+
+      .nav-links.open { display: flex; }
+
+      .hero {
+        padding: 8rem 0 6rem;
+        clip-path: polygon(0 0, 100% 0, 100% 93%, 0 100%);
+      }
+
+      .hero h1 { font-size: 2.2rem; }
+      .hero p { font-size: 1.05rem; }
+      .hero::after { font-size: 5rem; }
+
+      .section { padding: 4rem 0; }
+      .section-header { margin-bottom: 2.5rem; }
+      .section-header h2 { font-size: 1.75rem; }
+
+      .features-grid { grid-template-columns: 1fr; }
+
+      .pipeline {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
+        padding-left: 1.5rem;
+      }
+
+      .pipeline-step {
+        flex-direction: row;
+        text-align: left;
+        max-width: none;
+        gap: 1rem;
+        padding-bottom: 2rem;
+      }
+
+      .pipeline-step:not(:last-child)::after {
+        top: 44px;
+        left: 21px;
+        width: 3px;
+        height: calc(100% - 44px);
+      }
+
+      .pipeline-label, .pipeline-desc { margin-top: 0; }
+      .pipeline-label { margin-bottom: 0.15rem; }
+
+      .roles-grid { grid-template-columns: 1fr; }
+
+      .onboarding-tracks { grid-template-columns: 1fr; gap: 2.5rem; }
+
+      .footer-inner { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Skip Link -->
+  <a href="#main" style="position:absolute;left:-9999px;top:0;padding:0.5rem 1rem;background:var(--navy);color:white;z-index:200;" onfocus="this.style.left='0';" onblur="this.style.left='-9999px';">Skip to content</a>
+
+  <!-- ── Nav ── -->
+  <nav class="nav">
+    <div class="container nav-inner">
+      <a href="#" class="nav-brand">
+        <div class="nav-logo">
+          <svg width="20" height="20" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="20" height="24" rx="2" fill="none" stroke="white" stroke-width="1.5"/>
+            <rect x="9" y="2" width="10" height="5" rx="1" fill="white"/>
+            <line x1="8" y1="12" x2="20" y2="12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="8" y1="16" x2="20" y2="16" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="8" y1="20" x2="14" y2="20" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        Stamped
+      </a>
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#roles">Roles</a></li>
+        <li><a href="#get-started">Get Started</a></li>
+        <li><a href="#tech">Tech</a></li>
+        <li><a href="#get-started" class="btn btn-navy">Get Started</a></li>
+      </ul>
+      <button class="hamburger" id="hamburger" aria-label="Toggle navigation menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
+    </div>
+  </nav>
+
+  <main id="main">
+
+    <!-- ── Hero ── -->
+    <section class="hero">
+      <div class="container hero-content">
+        <div class="hero-badge animate-hero">Built for University Purchasing</div>
+        <h1 class="animate-hero">Purchase requests,<br>stamped and tracked.</h1>
+        <p class="animate-hero">A modern procurement portal for student organizations. Submit requests, get advisor approval, and track orders — all in one place.</p>
+        <div class="hero-ctas animate-hero">
+          <a href="#get-started" class="btn btn-stamp btn-lg">Get Started</a>
+          <a href="#how-it-works" class="btn btn-outline btn-lg">See How It Works</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Features ── -->
+    <section class="section section-paper" id="features">
+      <div class="container">
+        <div class="section-header">
+          <h2>Everything your purchasing office needs</h2>
+          <p>Streamline procurement from request to pickup with intelligent automation and clear visibility.</p>
+        </div>
+        <div class="features-grid">
+
+          <div class="feature-card animate-on-scroll">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3" fill="white" opacity="0.3"/>
+              </svg>
+            </div>
+            <h3>AI Approval Parsing</h3>
+            <p>Claude AI reads advisor email replies and auto-categorizes approvals, rejections, and follow-up questions. No manual sorting required.</p>
+          </div>
+
+          <div class="feature-card animate-on-scroll">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="8" width="18" height="12" rx="2" stroke="white" stroke-width="1.5"/>
+                <path d="M8 8V6C8 4.34 9.34 3 11 3H13C14.66 3 16 4.34 16 6V8" stroke="white" stroke-width="1.5"/>
+                <circle cx="12" cy="15" r="2" fill="white"/>
+              </svg>
+            </div>
+            <h3>One-Click Stamping</h3>
+            <p>Admins advance requests through the pipeline with a single click. Stamp to approve, order, receive, and release — with satisfying visual feedback.</p>
+          </div>
+
+          <div class="feature-card animate-on-scroll">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="white" stroke-width="1.5"/>
+                <path d="M12 7V12L15 15" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M8 12H12" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+              </svg>
+            </div>
+            <h3>Budget Tracking</h3>
+            <p>Real-time budget balances per organization and fiscal year. See allocated, spent, and reserved funds before approving any request.</p>
+          </div>
+
+          <div class="feature-card animate-on-scroll">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="3" width="8" height="8" rx="1.5" stroke="white" stroke-width="1.5"/>
+                <rect x="13" y="3" width="8" height="8" rx="1.5" stroke="white" stroke-width="1.5"/>
+                <rect x="3" y="13" width="8" height="8" rx="1.5" stroke="white" stroke-width="1.5"/>
+                <rect x="13" y="13" width="8" height="8" rx="1.5" stroke="white" stroke-width="1.5"/>
+              </svg>
+            </div>
+            <h3>Multi-Tenant</h3>
+            <p>Each university gets its own isolated workspace with custom settings, budgets, and users. One platform, many institutions.</p>
+          </div>
+
+          <div class="feature-card animate-on-scroll">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="white" stroke-width="1.5"/>
+                <path d="M14 2V8H20" stroke="white" stroke-width="1.5"/>
+                <line x1="8" y1="13" x2="16" y2="13" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+                <line x1="8" y1="17" x2="12" y2="17" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h3>Audit Trail</h3>
+            <p>Every status change, approval decision, and admin action is logged with timestamps and user attribution. Full compliance visibility.</p>
+          </div>
+
+          <div class="feature-card animate-on-scroll">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M21 15V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V15" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+                <polyline points="7,10 12,15 17,10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="12" y1="15" x2="12" y2="3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h3>Bulk Import</h3>
+            <p>Import existing requests from spreadsheets with AI-powered column mapping. Migrate your data without manual re-entry.</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ── How It Works ── -->
+    <section class="section section-white" id="how-it-works">
+      <div class="container">
+        <div class="section-header">
+          <h2>From request to pickup in 8 steps</h2>
+          <p>A clear workflow ensures nothing gets lost and everyone knows where things stand.</p>
+        </div>
+
+        <div class="pipeline">
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-draft);">1</div>
+            <div>
+              <div class="pipeline-label">Draft</div>
+              <div class="pipeline-desc">Student creates request</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-submitted);">2</div>
+            <div>
+              <div class="pipeline-label">Submitted</div>
+              <div class="pipeline-desc">Sent for review</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-pending);">3</div>
+            <div>
+              <div class="pipeline-label">Pending</div>
+              <div class="pipeline-desc">Awaiting advisor</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-approved);">4</div>
+            <div>
+              <div class="pipeline-label">Approved</div>
+              <div class="pipeline-desc">Advisor says yes</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-ordered);">5</div>
+            <div>
+              <div class="pipeline-label">Ordered</div>
+              <div class="pipeline-desc">Purchase placed</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-received);">6</div>
+            <div>
+              <div class="pipeline-label">Received</div>
+              <div class="pipeline-desc">Item arrives on campus</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-ready);">7</div>
+            <div>
+              <div class="pipeline-label">Ready</div>
+              <div class="pipeline-desc">Available for pickup</div>
+            </div>
+          </div>
+          <div class="pipeline-step animate-on-scroll">
+            <div class="pipeline-node" style="background: var(--status-complete);">8</div>
+            <div>
+              <div class="pipeline-label">Picked Up</div>
+              <div class="pipeline-desc">Complete!</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-callout animate-on-scroll">
+          <p><strong>Stale alert:</strong> Requests without updates for 5+ days are automatically flagged so nothing slips through the cracks.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Roles ── -->
+    <section class="section section-paper" id="roles">
+      <div class="container">
+        <div class="section-header">
+          <h2>Designed for every role on campus</h2>
+          <p>From students to finance admins, everyone gets the tools and visibility they need.</p>
+        </div>
+        <div class="roles-grid">
+
+          <div class="role-card animate-on-scroll" style="border-left-color: var(--status-submitted);">
+            <h3>Student</h3>
+            <div class="role-subtitle">Request submitter</div>
+            <ul>
+              <li>Submit purchase requests with items, vendors, and justification</li>
+              <li>Track request status in real time</li>
+              <li>View spending history for your organization</li>
+              <li>Get notified when items are ready for pickup</li>
+            </ul>
+          </div>
+
+          <div class="role-card animate-on-scroll" style="border-left-color: var(--status-pending);">
+            <h3>Org Lead</h3>
+            <div class="role-subtitle">Club treasurer or president</div>
+            <ul>
+              <li>View and manage all requests in your organization</li>
+              <li>Monitor organization budget and remaining funds</li>
+              <li>Approve or coordinate with your faculty advisor</li>
+              <li>Add and manage organization members</li>
+            </ul>
+          </div>
+
+          <div class="role-card animate-on-scroll" style="border-left-color: var(--status-approved);">
+            <h3>Admin Staff</h3>
+            <div class="role-subtitle">Purchasing office</div>
+            <ul>
+              <li>Process the admin queue — stamp requests forward</li>
+              <li>Send approval emails to faculty advisors</li>
+              <li>Track stale requests and pipeline dollar values</li>
+              <li>Bulk import requests from spreadsheets</li>
+            </ul>
+          </div>
+
+          <div class="role-card animate-on-scroll" style="border-left-color: var(--status-ordered);">
+            <h3>Finance Admin</h3>
+            <div class="role-subtitle">Budget management</div>
+            <ul>
+              <li>Allocate budgets per organization and fiscal year</li>
+              <li>View real-time spending and reserved funds</li>
+              <li>Generate financial reports and summaries</li>
+              <li>All admin staff capabilities included</li>
+            </ul>
+          </div>
+
+          <div class="role-card animate-on-scroll" style="border-left-color: var(--navy);">
+            <h3>Super Admin</h3>
+            <div class="role-subtitle">System administrator</div>
+            <ul>
+              <li>Configure tenant settings and email integration</li>
+              <li>Manage users, roles, and permissions</li>
+              <li>Access full audit logs and system health</li>
+              <li>Set up Azure AD SSO and Microsoft Graph</li>
+            </ul>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Getting Started ── -->
+    <section class="section section-white" id="get-started">
+      <div class="container">
+        <div class="section-header">
+          <h2>Up and running in minutes</h2>
+          <p>Whether you're setting up for your institution or joining as a user, onboarding is simple.</p>
+        </div>
+
+        <div class="onboarding-tracks">
+          <div class="track animate-on-scroll">
+            <h3>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="1.5" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M9 12L11 14L15 10"/>
+              </svg>
+              For Institutions
+            </h3>
+            <div class="track-steps">
+              <div class="track-step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                  <h4>Create your tenant</h4>
+                  <p>Run the one-time setup to register your institution, email domain, and create the first super admin account.</p>
+                </div>
+              </div>
+              <div class="track-step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                  <h4>Configure authentication</h4>
+                  <p>Connect Azure AD for SSO with your university accounts, or use email and password credentials.</p>
+                </div>
+              </div>
+              <div class="track-step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                  <h4>Invite your team</h4>
+                  <p>Add admin staff and finance users. Set up organizations, budgets, and email integration — then you're live.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="track animate-on-scroll">
+            <h3>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="1.5" aria-hidden="true">
+                <circle cx="12" cy="8" r="4"/>
+                <path d="M5 20C5 17.24 8.13 15 12 15C15.87 15 19 17.24 19 20"/>
+              </svg>
+              For Users
+            </h3>
+            <div class="track-steps">
+              <div class="track-step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                  <h4>Sign in</h4>
+                  <p>Use your university SSO account or the credentials provided by your admin. Your role is auto-detected from your email domain.</p>
+                </div>
+              </div>
+              <div class="track-step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                  <h4>Choose your role &amp; organization</h4>
+                  <p>Select whether you're a student or org leader, then join an existing organization or create a new one.</p>
+                </div>
+              </div>
+              <div class="track-step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                  <h4>Start submitting</h4>
+                  <p>Create your first purchase request with items, vendors, and justification. Track it through every stage to pickup.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="onboarding-cta">
+          <a href="#" class="btn btn-stamp btn-lg">Get Started with Stamped</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Tech Stack ── -->
+    <section class="section section-dark" id="tech">
+      <div class="container">
+        <div class="section-header">
+          <h2>Built with modern tools</h2>
+          <p>A robust, scalable stack designed for reliability and developer productivity.</p>
+        </div>
+        <div class="tech-pills">
+          <span class="tech-pill">Next.js 14</span>
+          <span class="tech-pill">React 18</span>
+          <span class="tech-pill">TypeScript</span>
+          <span class="tech-pill">Prisma</span>
+          <span class="tech-pill">PostgreSQL</span>
+          <span class="tech-pill">Claude AI</span>
+          <span class="tech-pill">Azure AD SSO</span>
+          <span class="tech-pill">NextAuth.js</span>
+          <span class="tech-pill">Tailwind CSS</span>
+        </div>
+        <p class="tech-desc">Stamped is a Next.js application backed by Prisma ORM and PostgreSQL, with Claude AI for intelligent email parsing and approval automation. Enterprise SSO via Azure AD keeps authentication simple and secure.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Footer ── -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <div class="nav-logo">
+            <svg width="20" height="20" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="20" height="24" rx="2" fill="none" stroke="white" stroke-width="1.5"/>
+              <rect x="9" y="2" width="10" height="5" rx="1" fill="white"/>
+              <line x1="8" y1="12" x2="20" y2="12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="8" y1="16" x2="20" y2="16" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="8" y1="20" x2="14" y2="20" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div>
+            <div class="footer-brand-name">Stamped</div>
+            <div class="footer-brand-tagline">University Purchasing Management</div>
+          </div>
+        </div>
+        <ul class="footer-links">
+          <li><a href="#features">Features</a></li>
+          <li><a href="#how-it-works">How It Works</a></li>
+          <li><a href="#roles">Roles</a></li>
+          <li><a href="#get-started">Get Started</a></li>
+        </ul>
+        <a href="#get-started" class="btn btn-stamp">Get Started</a>
+      </div>
+      <div class="footer-bottom">
+        &copy; 2026 Stamped. Built for educational institutions.
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Mobile nav toggle
+    document.getElementById('hamburger').addEventListener('click', function() {
+      document.getElementById('navLinks').classList.toggle('open');
+    });
+
+    // Close mobile nav on link click
+    document.querySelectorAll('#navLinks a').forEach(function(link) {
+      link.addEventListener('click', function() {
+        document.getElementById('navLinks').classList.remove('open');
+      });
+    });
+
+    // Scroll animations
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.animate-on-scroll').forEach(function(el) {
+      observer.observe(el);
+    });
+  </script>
+
+</body>
+</html>

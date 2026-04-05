@@ -44,14 +44,14 @@ function LoginForm() {
       if ((session?.user as any)?.role === "PLATFORM_ADMIN") {
         router.push("/platform/tenants");
       } else {
-        router.push("/");
+        router.push("/dashboard");
       }
     }
   }
 
   async function handleMicrosoftSignIn() {
     setSsoLoading(true);
-    await signIn("azure-ad", { callbackUrl: "/" });
+    await signIn("azure-ad", { callbackUrl: "/dashboard" });
   }
 
   return (
